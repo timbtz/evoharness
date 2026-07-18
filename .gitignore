@@ -1,0 +1,9 @@
+reference/
+runs/
+.env
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+tasks/binpacking/instances/*.json
+tasks/tsp/instances/*.tsp
