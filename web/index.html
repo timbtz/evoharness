@@ -621,6 +621,38 @@ function drawSolution(slot) {
       ctx.beginPath(); ctx.arc(x, y, 2, 0, 2 * Math.PI); ctx.fill();
     }
     cap.textContent = `tour through ${pts.length} points`;
+  } else if (r.kind === "routes") {
+    const pts = r.points || [], routes = r.routes || [];
+    if (!pts.length) { cap.textContent = "routes: empty render"; return; }
+    let xmin = Infinity, xmaxb = -Infinity, ymin = Infinity, ymaxb = -Infinity;
+    for (const [x, y] of pts) {
+      xmin = Math.min(xmin, x); xmaxb = Math.max(xmaxb, x);
+      ymin = Math.min(ymin, y); ymaxb = Math.max(ymaxb, y);
+    }
+    const span = Math.max(xmaxb - xmin, ymaxb - ymin) || 1;
+    const box = Math.min(W, H) - 2 * m;
+    const tx = ([x, y]) => [
+      (W - box) / 2 + ((x - xmin) / span) * box,
+      (H + box) / 2 - ((y - ymin) / span) * box,
+    ];
+    ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+    routes.forEach((route, ri) => {
+      ctx.strokeStyle = `hsl(${(ri * 137.5) % 360} 55% 60%)`;
+      ctx.beginPath();
+      const [dx, dy] = tx(pts[0]); ctx.moveTo(dx, dy);
+      for (const idx of route) { const [x, y] = tx(pts[idx] || [0, 0]); ctx.lineTo(x, y); }
+      ctx.closePath(); ctx.stroke();
+    });
+    ctx.fillStyle = "#e8eaed";
+    for (const p of pts) {
+      const [x, y] = tx(p);
+      ctx.beginPath(); ctx.arc(x, y, 2, 0, 2 * Math.PI); ctx.fill();
+    }
+    const [dx, dy] = tx(pts[0]);
+    ctx.fillStyle = "#e66767";
+    ctx.beginPath(); ctx.arc(dx, dy, 4, 0, 2 * Math.PI); ctx.fill();
+    cap.textContent = `${routes.length} routes, ${pts.length - 1} customers` +
+      (r.mean_gap_pct != null ? ` · gap ${r.mean_gap_pct}%` : "");
   } else {
     cap.textContent = "unknown render kind: " + r.kind;
   }

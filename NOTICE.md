@@ -23,5 +23,15 @@ per-module "what we take / from where / what we simplify" log.
 - **TSPLIB instances** (via github.com/mastqe/tsplib mirror): classic academic
   benchmark data (Reinelt, 1991); downloaded at setup by `tasks/tsp/fetch.py`,
   not redistributed in this repo.
+- **CVRPLIB instances** (Augerat et al. 1995 sets A/B/P; Uchoa et al. 2017 set X):
+  academic benchmark data from the CVRPLIB mirror (galgos.inf.puc-rio.br/cvrplib)
+  and the PyVRP/Instances GitHub mirror (MIT); downloaded at setup by
+  `tasks/cvrp/fetch.py`, not redistributed. Best-known costs pinned in
+  `tasks/cvrp/task.py` were cross-verified against CVRPLIB tables,
+  PyVRP/Instances `.sol` files, and neo.lcc.uma.es/vrp (2026-07-18).
+- **CVRP seed & wiki** (`tasks/cvrp/`): Clarke-Wright savings, 2-opt/relocate/swap
+  move set, and LNS/ruin-recreate facts are textbook material (Clarke & Wright 1964;
+  Shaw 1998; Uchoa et al. 2017); implementation is clean-room, no code copied
+  (PyVRP studied for benchmark conventions only).
 
 No GPL/AGPL code was used.

@@ -83,6 +83,71 @@ def run_python(code: str, timeout: float = 30.0, mem_mb: int = 2048) -> SandboxR
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+_DOCKER_READY: dict[str, bool] = {}
+
+
+def docker_image_ready(image: str, dockerfile: str | None = None,
+                       context: str | None = None) -> bool:
+    """True iff docker works and `image` exists locally (built lazily from
+    `dockerfile` on first miss). Cached per image; False => caller should fall back."""
+    if image not in _DOCKER_READY:
+        ok = False
+        try:
+            ok = subprocess.run(["docker", "image", "inspect", image],
+                                capture_output=True, timeout=30).returncode == 0
+            if not ok and dockerfile:
+                ok = subprocess.run(
+                    ["docker", "build", "-q", "-t", image, "-f", dockerfile,
+                     context or os.path.dirname(dockerfile)],
+                    capture_output=True, timeout=900).returncode == 0
+        except Exception:
+            ok = False
+        _DOCKER_READY[image] = ok
+    return _DOCKER_READY[image]
+
+
+def run_python_docker(code: str, timeout: float = 30.0, mem_mb: int = 1024,
+                      image: str = "python:3.13-slim",
+                      cpuset: str | None = None) -> SandboxResult:
+    """Run `code` as a python script in a throwaway container: no network, 1 CPU
+    (optionally pinned via `cpuset` for stable wall-clock budgets), memory cap.
+    Check docker_image_ready() first; a docker-level failure surfaces as rc != 0."""
+    tmp = tempfile.mkdtemp(prefix="evoh_")
+    name = f"evoh-{os.path.basename(tmp)}"
+    try:
+        with open(os.path.join(tmp, "main.py"), "w") as f:
+            f.write(code)
+        os.chmod(tmp, 0o755)
+        cmd = ["docker", "run", "--rm", "--name", name, "--network", "none",
+               "--cpus", "1", "--memory", f"{mem_mb}m", "--memory-swap", f"{mem_mb}m",
+               "--pids-limit", "256", "--cap-drop", "ALL",
+               "--security-opt", "no-new-privileges",
+               "-v", f"{tmp}:/work:ro", "-w", "/work"]
+        if cpuset is not None:
+            cmd += ["--cpuset-cpus", cpuset]
+        cmd += [image, "python3", "-I", "main.py"]
+        t0 = time.monotonic()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+        try:  # +15s: container start/stop overhead is outside the script's budget
+            out, err = proc.communicate(timeout=timeout + 15.0)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            try:
+                subprocess.run(["docker", "kill", name], capture_output=True, timeout=30)
+            except Exception:
+                pass  # wedged daemon: fall through to killing the client
+            try:
+                out, err = proc.communicate(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+            timed_out = True
+        return SandboxResult(out, err, proc.returncode, time.monotonic() - t0, timed_out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def run_c(code: str, timeout: float = 30.0, mem_mb: int = 2048,
           cflags: tuple[str, ...] = ("-O3", "-march=native")) -> SandboxResult:
     """Compile `code` with gcc (fixed flags) and run the binary in the jail.

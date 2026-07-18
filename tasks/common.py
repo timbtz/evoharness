@@ -18,10 +18,18 @@ def run_harness(script: str, timeout: float = 30.0, runner=run_python) -> EvalRe
     lines = [ln for ln in r.stdout.strip().splitlines() if ln.strip()]
     try:
         payload = json.loads(lines[-1])
+        if not isinstance(payload, dict):
+            raise ValueError("last line is not a JSON object")
     except (IndexError, ValueError):
         err = (r.stderr or r.stdout or "no output").strip()[-800:]
         return EvalResult(float("-inf"), error=err or "no parseable output", seconds=r.seconds)
+    metrics = payload.get("metrics")
+    metrics = metrics if isinstance(metrics, dict) else {}
     if payload.get("error"):
-        return EvalResult(float("-inf"), metrics=payload.get("metrics", {}),
+        return EvalResult(float("-inf"), metrics=metrics,
                           error=str(payload["error"])[:800], seconds=r.seconds)
-    return EvalResult(float(payload["score"]), metrics=payload.get("metrics", {}), seconds=r.seconds)
+    try:  # candidate-crafted output must degrade to -inf, never crash the host
+        return EvalResult(float(payload["score"]), metrics=metrics, seconds=r.seconds)
+    except (KeyError, TypeError, ValueError):
+        return EvalResult(float("-inf"), metrics=metrics,
+                          error="malformed score payload", seconds=r.seconds)
