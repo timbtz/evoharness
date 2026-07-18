@@ -101,7 +101,7 @@ class LLM:
 
 
 def parse_code(text: str) -> str | None:
-    """Extract the last ```python fenced block (writers may think aloud first).
-    A final block left unterminated by max_tokens truncation still counts."""
-    blocks = re.findall(r"```(?:python)?\s*\n(.*?)(?:```|\Z)", text, re.DOTALL)
+    """Extract the last fenced code block, any language tag (writers may think
+    aloud first). A final block left unterminated by max_tokens truncation counts."""
+    blocks = re.findall(r"```[\w+-]*[ \t]*\n(.*?)(?:```|\Z)", text, re.DOTALL)
     return blocks[-1].strip() if blocks else None

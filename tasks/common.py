@@ -8,10 +8,11 @@ from core.candidate import EvalResult
 from core.sandbox import run_python
 
 
-def run_harness(script: str, timeout: float = 30.0) -> EvalResult:
+def run_harness(script: str, timeout: float = 30.0, runner=run_python) -> EvalResult:
     """Script contract: print exactly one JSON line last:
-    {"score": float, "metrics": {...}} or {"error": "..."}."""
-    r = run_python(script, timeout=timeout)
+    {"score": float, "metrics": {...}} or {"error": "..."}.
+    `runner` is any sandbox entry point with run_python's signature (e.g. run_c)."""
+    r = runner(script, timeout=timeout)
     if r.timed_out:
         return EvalResult(float("-inf"), error=f"timeout after {timeout}s", seconds=r.seconds)
     lines = [ln for ln in r.stdout.strip().splitlines() if ln.strip()]

@@ -13,7 +13,7 @@ SWITCHES: dict[str, tuple[str, ...]] = {
     "roles": ("single_strong", "split_roles"),
 }
 OBJECTIVES = ("quality", "quality_per_dollar", "time_capped")
-TASKS = ("binpacking", "circles", "tsp")
+TASKS = ("binpacking", "circles", "tsp", "matmul_c")
 
 
 @dataclass

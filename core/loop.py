@@ -26,9 +26,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 PUBLIC_EVERY = 5  # generations between public-split reports
 
 SYSTEM = (
-    "You are an expert algorithm designer evolving a Python function. "
-    "Respond with exactly one ```python code block containing the complete improved function "
-    "(imports included). Brief reasoning before the block is fine."
+    "You are an expert algorithm designer evolving a function (language given by the task). "
+    "Respond with exactly one fenced code block containing the complete improved function "
+    "and anything it needs (imports/includes/helpers). Brief reasoning before the block is fine."
 )
 
 _AXES = {
@@ -122,7 +122,7 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                 [f"# Task\n{task.description}"]
                 + [s.render() for s in sections]
                 + ["Write an improved version of the function. Keep the exact signature. "
-                   "Output exactly one ```python code block."]
+                   "Output exactly one fenced code block."]
             )
             tools = ax["knowledge"].tools()
             text = llm.chat(

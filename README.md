@@ -14,7 +14,9 @@ or from the web UI.
 | roles | `single_strong` | `split_roles` (cheap writer) |
 
 Tasks: `binpacking` (FunSearch online bin packing), `circles` (26 circles in unit
-square), `tsp` (tour construction + fixed 2-opt polish). Each task has four splits —
+square), `tsp` (tour construction + fixed 2-opt polish), `matmul_c` (C matmul
+micro-kernel, score = measured speedup vs naive — artifacts can be C, not just
+Python; the sandbox compiles with gcc and jails the binary identically). Each task has four splits —
 train (selection), val (holdout gate only), public (reporting), private (end-of-run
 only, never in prompts) — so the generalization gap is measured, not assumed.
 Objectives: `quality`, `quality_per_dollar`, `time_capped`.
