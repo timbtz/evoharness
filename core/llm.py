@@ -66,6 +66,10 @@ class LLM:
                 resp = self.client.chat.completions.create(
                     model=model, messages=messages, temperature=temperature,
                     max_tokens=max_tokens, **({"tools": tools} if tools else {}),
+                    # GLM thinking mode burns 10x completion tokens and sometimes
+                    # spirals past any cap, leaving content empty. Evolution wants
+                    # many cheap diverse samples; selection does the deliberating.
+                    extra_body={"thinking": {"type": "disabled"}},
                 )
                 self._meter(resp, model, role, t0)
                 return resp.choices[0].message
@@ -77,7 +81,7 @@ class LLM:
         raise last_err
 
     def chat(self, model: str, messages: list[dict], temperature: float, role: str,
-             max_tokens: int = 4096, tools: list | None = None, tool_handler=None) -> str:
+             max_tokens: int = 16384, tools: list | None = None, tool_handler=None) -> str:
         """One metered chat exchange. `role` (writer/reflect/judge) is for ledger attribution.
         With `tools`, runs a bounded tool loop (max 3 rounds) using `tool_handler(name, args)`."""
         self.guard.check()
@@ -97,6 +101,7 @@ class LLM:
 
 
 def parse_code(text: str) -> str | None:
-    """Extract the last ```python fenced block (writers may think aloud first)."""
-    blocks = re.findall(r"```(?:python)?\s*\n(.*?)```", text, re.DOTALL)
+    """Extract the last ```python fenced block (writers may think aloud first).
+    A final block left unterminated by max_tokens truncation still counts."""
+    blocks = re.findall(r"```(?:python)?\s*\n(.*?)(?:```|\Z)", text, re.DOTALL)
     return blocks[-1].strip() if blocks else None
