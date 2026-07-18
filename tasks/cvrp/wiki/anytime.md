@@ -4,8 +4,8 @@
 Track `(best_routes, best_cost)` separately from the working candidate; update
 only on strict improvement; return `best_*` at the end, never the current
 working solution — a perturbation step easily leaves it worse than best, and
-returning it forfeits banked quality. The seed does this correctly (`best,
-best_c` in `solve()`); preserve the pattern.
+returning it forfeits banked quality. The seed does this correctly (`best` in
+`solve()`, re-verified after every C slice); preserve the pattern.
 
 ## Time discipline
 - Reserve ~0.3s margin from `deadline` (route list construction, harness JSON
@@ -14,18 +14,18 @@ best_c` in `solve()`); preserve the pattern.
 - Python CANNOT interrupt a running ctypes call — it blocks until the C
   function returns. Pass a `tlimit` INTO every long C call and poll
   `clock_gettime(CLOCK_MONOTONIC, ...)` inside the C loop (seed's `now()`).
-- Shrink `tlimit` as the deadline nears (seed: `min(remaining - 0.3, 1.0)`) so
-  one call can't consume the whole remaining budget on a slow sweep.
+- Shrink `tlimit` as the deadline nears (seed: `min(left, 1.5)` slices behind a
+  0.35s reserve) so one call can't consume the whole remaining budget.
 
 ## Perturbation strategies
-- **Random ejection** (seed): remove k random customers, reinsert greedily at
+- **Random ejection**: remove k random customers, reinsert greedily at
   cheapest feasible slot. Cheap, weak — ejected customers are unrelated, so
   repair quality is low.
 - **Segment / route ruin**: eject an entire short route, or a contiguous
   visit-order segment — bigger, structured perturbation, escapes deeper
   local optima than single-customer ejection.
 
-## LNS ruin & recreate
+## LNS ruin & recreate (the seed's outer loop, in C)
 Destroy 10-30% of customers via **Shaw relatedness**: r(i,j) small (related)
 when d(i,j) is small (optionally + |demand[i]-demand[j]|); pick a random seed
 customer, repeatedly eject its most-related remaining customers so the removed

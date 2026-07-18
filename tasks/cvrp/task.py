@@ -186,7 +186,8 @@ class _CvrpTask:
     description = (_DIR / "description.md").read_text()
 
     def seed_code(self) -> str:
-        return (_DIR / "seed.py").read_text()
+        from tasks.cvrp.seed import seed_code  # assembler: seed/kernel.c + seed/solver.py
+        return seed_code()
 
     def evaluate(self, code: str, split: str) -> EvalResult:
         if split not in _SPLITS:

@@ -30,14 +30,18 @@ best-known, not all proven optimal.
 - **X** (public + hidden): generated instances, mixed depot positioning and
   demand distributions, much larger n (101-303).
 
-## Gap expectations (gap% = 100*(cost-BKS)/BKS)
-| search level                          | typical gap |
-|----------------------------------------|-------------|
-| plain savings only                     | 8-12%       |
-| + 2-opt / relocate                     | 5-8%        |
-| + swap / Or-opt / 2-opt*               | 3-5%        |
-| LNS / ruin-recreate, well tuned        | 1-3%        |
-| state-of-the-art (HGS, far larger budgets) | <1%     |
+## Gap expectations (gap% = 100*(cost-BKS)/BKS, within this task's budgets)
+| search level                                          | typical gap |
+|-------------------------------------------------------|-------------|
+| plain savings only                                    | 8-12%       |
+| + full-sweep 2-opt / relocate / swap (no cand. lists) | ~0.2% A/B/P, 1.8-2% X |
+| + granular LS: K-nearest lists, don't-look bits, Or-opt, 2-opt* | ~1-1.5% X |
+| + LNS ruin-recreate (Shaw removal, regret-2, SA-lite) = the seed | 0% train/val, ~0.1% public, ~0.7% private |
+| state-of-the-art (HGS, tuned, similar budgets)        | ~0.2-0.5% on the larger X |
+
+The seed already sits at the LNS tier: improving it means beating ~0.7% on the
+hidden X instances — sharper acceptance/ruin policies, better neighborhoods, or
+matching-BKS on the public X, not re-adding basics.
 
 ## Anytime lever
 - n<=65 (train/val, 3s budget): local search converges to a local optimum in
