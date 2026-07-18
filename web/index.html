@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EvoHarness Bench</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #0e1116; --surface: #14181f; --card: #171c24; --inset: #10141a;
+    --ink: #e8eaed; --ink-2: #9aa3ad; --muted: #6b7280;
+    --grid: #262c35; --axis: #3a424d; --border: rgba(255,255,255,.08);
+    --a: #1fa0c2; --b: #d9762e; --bad: #e66767; --good: #34a853;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 0 16px 40px; }
+  header { max-width: 1180px; margin: 0 auto; padding: 18px 16px 6px; }
+  header h1 { font-size: 20px; margin: 0; }
+  header h1 span { color: var(--ink-2); font-weight: 400; font-size: 14px; margin-left: 8px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--ink-2); margin: 0 0 10px; font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+          padding: 14px 16px; margin-top: 14px; }
+  /* config panel */
+  .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+              gap: 10px; margin-bottom: 12px; }
+  .cfg-grid label { display: flex; flex-direction: column; gap: 4px;
+                    font-size: 11px; color: var(--ink-2); }
+  input, select { background: var(--inset); color: var(--ink); border: 1px solid var(--axis);
+                  border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; }
+  input:focus, select:focus { outline: 1px solid var(--a); }
+  #switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .axis { background: var(--inset); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .axis-name { font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+  .axis-cap { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .seg { display: flex; margin-top: 6px; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; background: transparent; border: 0; color: var(--ink-2); padding: 5px 4px;
+                font: inherit; font-size: 12px; cursor: pointer; }
+  .seg button.on { background: var(--axis); color: var(--ink); font-weight: 600; }
+  /* buttons */
+  button { cursor: pointer; }
+  .btn { background: var(--inset); color: var(--ink); border: 1px solid var(--axis);
+         border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; }
+  .btn:hover:not(:disabled) { border-color: var(--ink-2); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { border-color: transparent; background: #24506000; font-weight: 600; }
+  #slot-A .btn.primary { background: color-mix(in srgb, var(--a) 25%, var(--inset)); }
+  #slot-B .btn.primary { background: color-mix(in srgb, var(--b) 25%, var(--inset)); }
+  /* chart */
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  #legend { display: flex; gap: 18px; font-size: 12px; color: var(--ink-2); }
+  #legend .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+                  margin-right: 5px; vertical-align: -1px; }
+  #chart-wrap { position: relative; }
+  #chart { width: 100%; height: 320px; display: block; background: var(--surface); border-radius: 8px; }
+  #tooltip { position: absolute; pointer-events: none; background: #0d1015f0; border: 1px solid var(--axis);
+             border-radius: 6px; padding: 6px 9px; font-size: 12px; white-space: nowrap; z-index: 5; }
+  #tooltip .tt-x { color: var(--ink-2); margin-bottom: 2px; }
+  /* slots */
+  #slots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px) { #slots { grid-template-columns: 1fr; } }
+  .slot-head { display: flex; align-items: baseline; gap: 8px; }
+  .slot-head .dot { width: 10px; height: 10px; border-radius: 50%; align-self: center; }
+  .slot-head h2 { margin: 0; flex: 1; }
+  .status { font-size: 12px; color: var(--ink-2); }
+  .status.running { color: var(--good); }
+  .status.error { color: var(--bad); }
+  .slot-btns { display: flex; gap: 8px; margin: 10px 0; }
+  .summary { font-size: 12px; color: var(--ink-2); background: var(--inset); border-radius: 6px;
+             padding: 7px 9px; margin-bottom: 10px; line-height: 1.6; }
+  .summary b { color: var(--ink); font-weight: 600; }
+  .summary .sw { display: inline-block; background: var(--axis); color: var(--ink); border-radius: 4px;
+                 padding: 0 6px; margin: 1px 3px 1px 0; font-size: 11px; }
+  canvas.solution { width: 100%; height: 170px; display: block; background: var(--surface); border-radius: 8px; }
+  .sol-cap { font-size: 11px; color: var(--muted); margin: 4px 0 10px; min-height: 14px; }
+  /* feed */
+  .feed { max-height: 300px; overflow-y: auto; font-size: 12px;
+          font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+  .feed .row { display: flex; gap: 8px; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }
+  .feed .row.cand { cursor: pointer; }
+  .feed .row.cand:hover { background: var(--inset); }
+  .feed .gen { color: var(--muted); width: 34px; flex: none; }
+  .feed .typ { width: 76px; flex: none; color: var(--ink-2); }
+  .feed .typ.candidate { color: var(--ink); }
+  .feed .typ.run_end, .feed .typ.run_start { color: var(--good); }
+  .feed .typ.gen_error { color: var(--bad); }
+  .feed .ok { width: 14px; flex: none; }
+  .feed .ok.yes { color: var(--good); } .feed .ok.no { color: var(--bad); }
+  .feed .score { width: 90px; flex: none; text-align: right; }
+  .feed .usd { color: var(--muted); }
+  .feed pre { background: var(--inset); border: 1px solid var(--border); border-radius: 6px;
+              margin: 2px 0 6px 40px; padding: 8px; font-size: 11px; overflow-x: auto;
+              max-height: 240px; white-space: pre; }
+  /* past runs */
+  #runstrip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .runchip { flex: none; background: var(--inset); border: 1px solid var(--border); border-radius: 8px;
+             padding: 6px 10px; font-size: 12px; color: var(--ink-2); text-align: left; }
+  .runchip:hover { border-color: var(--ink-2); }
+  .runchip .rid { color: var(--ink); font-weight: 600; display: block; }
+  .runchip .st-done { color: var(--good); } .runchip .st-running { color: var(--a); }
+  .empty { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header><h1>EvoHarness <span>A/B comparison bench</span></h1></header>
+<main>
+  <section class="card" id="config">
+    <h2>Config</h2>
+    <div class="cfg-grid">
+      <label>Task <select id="cfg-task"></select></label>
+      <label>Objective <select id="cfg-objective"></select></label>
+      <label>Seed <input id="cfg-seed" type="number" step="1" value="0"></label>
+      <label>Max USD <input id="cfg-max_usd" type="number" step="0.1" min="0"></label>
+      <label>Max calls <input id="cfg-max_calls" type="number" step="1" min="1"></label>
+      <label>Max seconds <input id="cfg-max_seconds" type="number" step="10" min="1"></label>
+      <label>Strong model <input id="cfg-strong"></label>
+      <label>Cheap model <input id="cfg-cheap"></label>
+    </div>
+    <div id="switches"></div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head"><h2>Best train score so far</h2><div id="legend"></div></div>
+    <div id="chart-wrap"><canvas id="chart"></canvas><div id="tooltip" hidden></div></div>
+  </section>
+
+  <div id="slots"></div>
+
+  <section class="card">
+    <h2>Past runs</h2>
+    <div id="runstrip"><span class="empty">loading…</span></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (sel, el) => (el || document).querySelector(sel);
+const COLORS = { A: "#1fa0c2", B: "#d9762e" };
+const CAPTIONS = {
+  feedback: "what the LLM sees", gate: "how candidates are accepted",
+  search: "population structure", knowledge: "wiki access", roles: "which model writes",
+};
+const state = { meta: null, usdSeen: false, slots: {} };
+
+/* ---------- small helpers ---------- */
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function fmtScore(v) {
+  if (v == null || Number.isNaN(v)) return "—";
+  if (!Number.isFinite(v)) return v > 0 ? "inf" : "-inf";
+  return Math.abs(v) >= 1000 ? v.toFixed(0) : +v.toPrecision(4) + "";
+}
+function fmtUsd(v) { return v == null ? "—" : "$" + (+v).toFixed(4); }
+function parseEvent(line) {
+  try { return JSON.parse(line); } catch (e) { /* python may emit bare Infinity/NaN */ }
+  try {
+    return JSON.parse(line.replace(/-Infinity/g, "-1e999")
+      .replace(/\bInfinity\b/g, "1e999").replace(/\bNaN\b/g, "null"));
+  } catch (e) { return null; }
+}
+function niceTicks(min, max, n) {
+  const span = (max - min) || 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(span / n)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step - 1e-9) * step; v <= max + step * 1e-6; v += step)
+    out.push(Math.abs(v) < step * 1e-6 ? 0 : v);
+  return out;
+}
+function fitCanvas(c) { // match backing store to CSS size * dpr
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, W: r.width, H: r.height };
+}
+
+/* ---------- config panel ---------- */
+function buildPanel(meta) {
+  const d = meta.defaults;
+  const fill = (id, opts, val) => {
+    const el = $(id);
+    el.innerHTML = opts.map(o => `<option${o === val ? " selected" : ""}>${esc(o)}</option>`).join("");
+  };
+  fill("#cfg-task", meta.tasks, d.task);
+  fill("#cfg-objective", meta.objectives, d.objective);
+  $("#cfg-seed").value = d.seed;
+  $("#cfg-max_usd").value = d.budget.max_usd;
+  $("#cfg-max_calls").value = d.budget.max_calls;
+  $("#cfg-max_seconds").value = d.budget.max_seconds;
+  $("#cfg-strong").value = d.models.strong;
+  $("#cfg-cheap").value = d.models.cheap;
+  const box = $("#switches");
+  for (const [axis, opts] of Object.entries(meta.switches)) {
+    const div = document.createElement("div");
+    div.className = "axis";
+    div.innerHTML = `<div class="axis-name">${esc(axis)}</div>
+      <div class="seg" data-axis="${esc(axis)}">` +
+      opts.map(o => `<button type="button" data-value="${esc(o)}"
+        class="${o === d.switches[axis] ? "on" : ""}">${esc(o)}</button>`).join("") +
+      `</div><div class="axis-cap">${esc(CAPTIONS[axis] || "")}</div>`;
+    div.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+      div.querySelectorAll(".seg button").forEach(x => x.classList.remove("on"));
+      b.classList.add("on");
+    });
+    box.appendChild(div);
+  }
+}
+function readConfig() {
+  const switches = {};
+  document.querySelectorAll("#switches .seg").forEach(seg => {
+    const on = seg.querySelector("button.on");
+    if (on) switches[seg.dataset.axis] = on.dataset.value;
+  });
+  return {
+    task: $("#cfg-task").value,
+    objective: $("#cfg-objective").value,
+    seed: parseInt($("#cfg-seed").value, 10) || 0,
+    switches,
+    models: { strong: $("#cfg-strong").value.trim(), cheap: $("#cfg-cheap").value.trim() },
+    budget: {
+      max_usd: parseFloat($("#cfg-max_usd").value) || 0,
+      max_calls: parseInt($("#cfg-max_calls").value, 10) || 1,
+      max_seconds: parseFloat($("#cfg-max_seconds").value) || 1,
+    },
+  };
+}
+
+/* ---------- slots ---------- */
+function newSlot(name) {
+  return { name, config: null, runId: null, es: null, status: "idle", receivedAny: false,
+           best: null, points: [], final: null, render: null, events: [], expandedId: null };
+}
+function buildSlot(name) {
+  const el = document.createElement("section");
+  el.className = "card"; el.id = "slot-" + name;
+  el.innerHTML = `
+    <div class="slot-head"><span class="dot" style="background:${COLORS[name]}"></span>
+      <h2>Slot ${name}</h2><span class="status" id="status-${name}">idle</span></div>
+    <div class="slot-btns">
+      <button class="btn" id="snap-${name}">Use current config</button>
+      <button class="btn primary" id="start-${name}">Start</button>
+      <button class="btn" id="stop-${name}" disabled>Stop</button></div>
+    <div class="summary" id="summary-${name}">no config — press “Use current config”</div>
+    <canvas class="solution" id="sol-${name}"></canvas>
+    <div class="sol-cap" id="solcap-${name}"></div>
+    <div class="feed" id="feed-${name}"><span class="empty">no events yet</span></div>`;
+  $("#slots").appendChild(el);
+  $("#snap-" + name).onclick = () => snapConfig(state.slots[name]);
+  $("#start-" + name).onclick = () => startRun(state.slots[name]);
+  $("#stop-" + name).onclick = () => stopRun(state.slots[name]);
+}
+function snapConfig(slot) {
+  slot.config = readConfig();
+  renderSummary(slot);
+}
+function renderSummary(slot) {
+  const c = slot.config;
+  const el = $("#summary-" + slot.name);
+  if (!c) { el.textContent = "no config"; return; }
+  const sw = Object.entries(c.switches || {})
+    .map(([k, v]) => `<span class="sw">${esc(k)}:${esc(v)}</span>`).join("");
+  const b = c.budget || {};
+  el.innerHTML = `<b>${esc(c.task)}</b> · seed ${esc(c.seed)} · ${esc(c.objective)}
+    · $${esc(b.max_usd)} / ${esc(b.max_calls)} calls / ${esc(b.max_seconds)}s<br>${sw}
+    ${slot.runId ? `<br>run <b>${esc(slot.runId)}</b>` : ""}`;
+}
+function setStatus(slot, text, cls) {
+  const el = $("#status-" + slot.name);
+  el.textContent = text || slot.status;
+  el.className = "status " + (cls || (slot.status === "running" ? "running" : ""));
+  $("#start-" + slot.name).disabled = slot.status === "running" || slot.status === "starting";
+  $("#stop-" + slot.name).disabled = !(slot.runId && (slot.status === "running" || slot.status === "starting"));
+}
+function resetSlotData(slot) {
+  slot.best = null; slot.points = []; slot.final = null; slot.render = null;
+  slot.events = []; slot.expandedId = null; slot.receivedAny = false;
+}
+async function startRun(slot) {
+  if (!slot.config) snapConfig(slot);
+  setStatus(slot, "launching…");
+  try {
+    const res = await fetch("/api/runs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(slot.config),
+    });
+    if (!res.ok) throw new Error((await res.text()).slice(0, 200));
+    const j = await res.json();
+    resetSlotData(slot);
+    slot.runId = j.run_id;
+    slot.status = "starting";
+    renderSummary(slot);
+    attach(slot);
+    setStatus(slot, "starting (waiting for ledger)…");
+  } catch (e) {
+    slot.status = "error";
+    setStatus(slot, "error: " + e.message, "error");
+  }
+}
+async function stopRun(slot) {
+  if (!slot.runId) return;
+  try { await fetch(`/api/runs/${encodeURIComponent(slot.runId)}/stop`, { method: "POST" }); }
+  catch (e) { /* ignore */ }
+  setStatus(slot, "stop requested…");
+}
+function closeStream(slot) {
+  if (slot.es) { slot.es.close(); slot.es = null; }
+}
+function attach(slot) {
+  closeStream(slot);
+  const es = new EventSource(`/api/runs/${encodeURIComponent(slot.runId)}/events`);
+  slot.es = es;
+  es.onopen = () => { // a reconnect replays the file from byte 0: start clean
+    if (slot.receivedAny) { resetSlotData(slot); redrawAll(slot); }
+  };
+  es.onmessage = msg => {
+    const ev = parseEvent(msg.data);
+    if (ev) { slot.receivedAny = true; handleEvent(slot, ev); }
+  };
+  es.onerror = () => {
+    if (slot.status !== "done") setStatus(slot, slot.status + " (stream retrying…)");
+  };
+}
+
+/* ---------- event handling ---------- */
+function handleEvent(slot, ev) {
+  switch (ev.type) {
+    case "run_start":
+      slot.status = "running";
+      slot.config = ev.config || slot.config;
+      renderSummary(slot);
+      break;
+    case "candidate": {
+      const t = ev.scores ? ev.scores.train : null;
+      if (ev.accepted && t != null && Number.isFinite(t) && (slot.best == null || t > slot.best))
+        slot.best = t;
+      const cost = ev.cost || {};
+      const usd = +cost.usd || 0, calls = +cost.calls || 0;
+      if (usd > 0) state.usdSeen = true;
+      if (slot.best != null) slot.points.push({ usd, calls, y: slot.best });
+      break;
+    }
+    case "public":
+      if (ev.render) slot.render = ev.render;
+      if ((+ev.usd || 0) > 0) state.usdSeen = true;
+      break;
+    case "run_end":
+      slot.status = "done";
+      slot.final = { usd: +ev.usd || 0, calls: +ev.calls || 0,
+                     y: Number.isFinite(ev.private) ? ev.private : null, ev };
+      if ((+ev.usd || 0) > 0) state.usdSeen = true;
+      if (ev.render) slot.render = ev.render;
+      closeStream(slot); // server ends the stream; avoid auto-reconnect replay
+      break;
+  }
+  slot.events.push(ev);
+  if (slot.events.length > 200) slot.events.shift();
+  redrawAll(slot);
+  setStatus(slot);
+}
+function redrawAll(slot) {
+  drawChart();
+  drawSolution(slot);
+  renderFeed(slot);
+  renderLegend();
+}
+
+/* ---------- feed ---------- */
+function feedCells(ev) {
+  const gen = ev.gen != null ? ev.gen : (ev.meta && ev.meta.gen);
+  const g = gen != null ? "g" + gen : "";
+  switch (ev.type) {
+    case "candidate": {
+      const t = ev.scores ? ev.scores.train : null;
+      const usd = ev.cost ? ev.cost.usd : null;
+      return { g, extra: esc(ev.id || ""), ok: ev.accepted ? "✓" : "✗",
+               okCls: ev.accepted ? "yes" : "no", score: fmtScore(t), usd: fmtUsd(usd) };
+    }
+    case "llm_call":
+      return { g, extra: esc((ev.role || "") + " " + (ev.model || "")), score: "", usd: fmtUsd(ev.usd) };
+    case "public":
+      return { g, extra: esc(ev.id || ""), score: fmtScore(ev.score), usd: fmtUsd(ev.usd) };
+    case "gen_error":
+      return { g, extra: esc(String(ev.error || "").slice(0, 60)), score: "", usd: "" };
+    case "run_end":
+      return { g, extra: esc(String(ev.stop_reason || "")), score: "priv " + fmtScore(ev.private),
+               usd: fmtUsd(ev.usd) };
+    case "run_start":
+      return { g, extra: esc((ev.config && ev.config.task) || ""), score: "", usd: "" };
+    default:
+      return { g, extra: "", score: "", usd: "" };
+  }
+}
+function renderFeed(slot) {
+  const el = $("#feed-" + slot.name);
+  const recent = slot.events.slice(-30).reverse();
+  if (!recent.length) { el.innerHTML = '<span class="empty">no events yet</span>'; return; }
+  let html = "";
+  for (const ev of recent) {
+    const c = feedCells(ev);
+    const isCand = ev.type === "candidate";
+    html += `<div class="row${isCand ? " cand" : ""}"${isCand ? ` data-id="${esc(ev.id)}"` : ""}>
+      <span class="gen">${c.g}</span><span class="typ ${esc(ev.type)}">${esc(ev.type)}</span>
+      <span class="ok ${c.okCls || ""}">${c.ok || ""}</span><span>${c.extra}</span>
+      <span class="score">${c.score}</span><span class="usd">${c.usd}</span></div>`;
+    if (isCand && slot.expandedId === ev.id) {
+      const body = ev.code ? esc(ev.code)
+        : esc(JSON.stringify({ scores: ev.scores, meta: ev.meta }, null, 2));
+      html += `<pre>${body}</pre>`;
+    }
+  }
+  el.innerHTML = html;
+  el.querySelectorAll(".row.cand").forEach(row => row.onclick = () => {
+    slot.expandedId = slot.expandedId === row.dataset.id ? null : row.dataset.id;
+    renderFeed(slot);
+  });
+}
+
+/* ---------- shared chart ---------- */
+const PAD = { l: 62, r: 18, t: 14, b: 36 };
+let chartScale = null; // kept for the hover layer
+function slotSeries(slot) {
+  const xk = state.usdSeen ? "usd" : "calls";
+  const pts = slot.points.map(p => ({ x: p[xk], y: p.y }));
+  const fin = slot.final && slot.final.y != null
+    ? { x: slot.final[xk], y: slot.final.y } : null;
+  return { pts, fin };
+}
+function drawChart() {
+  const { ctx, W, H } = fitCanvas($("#chart"));
+  ctx.clearRect(0, 0, W, H);
+  const series = Object.values(state.slots).map(s => ({ slot: s, ...slotSeries(s) }));
+  let xmax = 0, ymin = Infinity, ymax = -Infinity;
+  for (const s of series) {
+    for (const p of s.pts) { xmax = Math.max(xmax, p.x); ymin = Math.min(ymin, p.y); ymax = Math.max(ymax, p.y); }
+    if (s.fin) { xmax = Math.max(xmax, s.fin.x); ymin = Math.min(ymin, s.fin.y); ymax = Math.max(ymax, s.fin.y); }
+  }
+  const empty = !Number.isFinite(ymin);
+  if (empty) { xmax = 1; ymin = -1; ymax = 0; }
+  if (ymin === ymax) { ymin -= Math.abs(ymin) * 0.1 || 1; ymax += Math.abs(ymax) * 0.1 || 1; }
+  const ypad = (ymax - ymin) * 0.08;
+  ymin -= ypad; ymax += ypad; xmax = xmax * 1.06 || 1;
+  const px = x => PAD.l + (x / xmax) * (W - PAD.l - PAD.r);
+  const py = y => H - PAD.b - ((y - ymin) / (ymax - ymin)) * (H - PAD.t - PAD.b);
+  chartScale = { px, py, xmax, ymin, ymax, W, H };
+  // grid + ticks
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.strokeStyle = "#262c35"; ctx.fillStyle = "#898781"; ctx.lineWidth = 1;
+  for (const t of niceTicks(ymin, ymax, 5)) {
+    const y = Math.round(py(t)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtScore(t), PAD.l - 8, y);
+  }
+  for (const t of niceTicks(0, xmax, 6)) {
+    const x = Math.round(px(t)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, H - PAD.b); ctx.stroke();
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(state.usdSeen ? "$" + +t.toFixed(3) : String(Math.round(t)), x, H - PAD.b + 6);
+  }
+  ctx.strokeStyle = "#3a424d";
+  ctx.strokeRect(PAD.l + 0.5, PAD.t + 0.5, W - PAD.l - PAD.r - 1, H - PAD.t - PAD.b - 1);
+  // axis titles
+  ctx.fillStyle = "#9aa3ad"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText(state.usdSeen ? "cumulative USD spent" : "LLM calls", (PAD.l + W - PAD.r) / 2, H - 2);
+  ctx.save();
+  ctx.translate(12, (PAD.t + H - PAD.b) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText("best train score", 0, 0);
+  ctx.restore();
+  if (empty) {
+    ctx.fillStyle = "#6b7280"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("start a run to see live scores", (PAD.l + W - PAD.r) / 2, (PAD.t + H - PAD.b) / 2);
+    return;
+  }
+  // series: step-after lines
+  for (const s of series) {
+    if (!s.pts.length && !s.fin) continue;
+    const col = COLORS[s.slot.name];
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = "round";
+    ctx.beginPath();
+    let prev = null;
+    for (const p of s.pts) {
+      if (!prev) ctx.moveTo(px(p.x), py(p.y));
+      else { ctx.lineTo(px(p.x), py(prev.y)); ctx.lineTo(px(p.x), py(p.y)); }
+      prev = p;
+    }
+    if (prev) ctx.stroke();
+    if (prev) { // direct label at line end
+      ctx.fillStyle = col; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.font = "bold 11px system-ui, sans-serif";
+      ctx.fillText(s.slot.name, Math.min(px(prev.x) + 5, W - PAD.r - 10), py(prev.y));
+    }
+    if (s.fin) { // annotated final private score
+      const fx = px(s.fin.x), fy = py(s.fin.y);
+      if (prev) { // dashed link from last train point to final
+        ctx.save(); ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeStyle = col;
+        ctx.beginPath(); ctx.moveTo(px(prev.x), py(prev.y)); ctx.lineTo(fx, fy); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(fx, fy, 5, 0, 2 * Math.PI); ctx.fill();
+      ctx.strokeStyle = "#14181f"; ctx.lineWidth = 2; ctx.stroke(); // surface ring
+      ctx.fillStyle = "#e8eaed"; ctx.font = "11px system-ui, sans-serif";
+      ctx.textAlign = fx > W - 130 ? "right" : "left"; ctx.textBaseline = "bottom";
+      ctx.fillText(`${s.slot.name} private ${fmtScore(s.fin.y)}`,
+                   fx + (fx > W - 130 ? -8 : 8), fy - 4);
+    }
+  }
+}
+function renderLegend() {
+  $("#legend").innerHTML = Object.values(state.slots).map(s => {
+    const last = s.points.length ? s.points[s.points.length - 1] : null;
+    const bits = [s.runId ? esc(s.runId) : "empty"];
+    if (s.best != null) bits.push("best " + fmtScore(s.best));
+    if (last) bits.push(state.usdSeen ? fmtUsd(last.usd) : last.calls + " calls");
+    return `<span><span class="chip" style="background:${COLORS[s.name]}"></span>${s.name}: ${bits.join(" · ")}</span>`;
+  }).join("");
+}
+/* hover: crosshair readout of both series */
+function initHover() {
+  const c = $("#chart"), tip = $("#tooltip");
+  c.addEventListener("mousemove", e => {
+    if (!chartScale) return;
+    const r = c.getBoundingClientRect(), mx = e.clientX - r.left;
+    if (mx < PAD.l || mx > r.width - PAD.r) { tip.hidden = true; drawChart(); return; }
+    const xv = (mx - PAD.l) / (r.width - PAD.l - PAD.r) * chartScale.xmax;
+    const xk = state.usdSeen ? "usd" : "calls";
+    let rows = "";
+    for (const s of Object.values(state.slots)) {
+      let at = null;
+      for (const p of s.points) { if (p[xk] <= xv) at = p; else break; }
+      if (at) rows += `<div><span class="chip" style="background:${COLORS[s.name]};display:inline-block;
+        width:8px;height:8px;border-radius:2px;margin-right:4px"></span>${s.name}: ${fmtScore(at.y)}</div>`;
+    }
+    if (!rows) { tip.hidden = true; return; }
+    tip.innerHTML = `<div class="tt-x">${state.usdSeen ? fmtUsd(xv) : Math.round(xv) + " calls"}</div>` + rows;
+    tip.hidden = false;
+    tip.style.left = Math.min(mx + 14, r.width - 150) + "px";
+    tip.style.top = "16px";
+    drawChart(); // redraw, then overlay the crosshair
+    const ctx = c.getContext("2d");
+    ctx.strokeStyle = "#6b7280"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(mx + 0.5, PAD.t); ctx.lineTo(mx + 0.5, r.height - PAD.b); ctx.stroke();
+    ctx.setLineDash([]);
+  });
+  c.addEventListener("mouseleave", () => { tip.hidden = true; drawChart(); });
+}
+
+/* ---------- solution canvases ---------- */
+function drawSolution(slot) {
+  const { ctx, W, H } = fitCanvas($("#sol-" + slot.name));
+  const cap = $("#solcap-" + slot.name);
+  ctx.clearRect(0, 0, W, H);
+  const r = slot.render, col = COLORS[slot.name];
+  if (!r || !r.kind) {
+    ctx.fillStyle = "#6b7280"; ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("no solution rendered yet", W / 2, H / 2);
+    cap.textContent = "";
+    return;
+  }
+  const m = 10;
+  if (r.kind === "bins") {
+    const loads = r.loads || [], capY = r.capacity || 100;
+    if (!loads.length) { cap.textContent = "bins: empty render"; return; }
+    const peak = Math.max(capY, ...loads) * 1.08;
+    const bw = (W - 2 * m) / loads.length;
+    ctx.fillStyle = col;
+    for (let i = 0; i < loads.length; i++) {
+      const h = (loads[i] / peak) * (H - 2 * m);
+      ctx.globalAlpha = loads[i] > capY ? 1 : 0.75;
+      ctx.fillRect(m + i * bw, H - m - h, Math.max(bw - Math.min(2, bw * 0.2), 0.5), h);
+    }
+    ctx.globalAlpha = 1;
+    const cy = H - m - (capY / peak) * (H - 2 * m);
+    ctx.strokeStyle = "#e66767"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(m, cy); ctx.lineTo(W - m, cy); ctx.stroke(); ctx.setLineDash([]);
+    cap.textContent = `${loads.length} bins · capacity ${capY}` +
+      (r.excess_pct != null ? ` · excess ${r.excess_pct}%` : "");
+  } else if (r.kind === "circles") {
+    const box = Math.min(W, H) - 2 * m, ox = (W - box) / 2, oy = (H - box) / 2;
+    ctx.strokeStyle = "#3a424d";
+    ctx.strokeRect(ox + 0.5, oy + 0.5, box, box);
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.5;
+    for (const [x, y, rad] of r.circles || []) {
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath(); ctx.arc(ox + x * box, oy + (1 - y) * box, rad * box, 0, 2 * Math.PI); ctx.fill();
+      ctx.globalAlpha = 1; ctx.stroke();
+    }
+    cap.textContent = `${(r.circles || []).length} circles in unit square` +
+      (r.sum_radii != null ? ` · Σr ${r.sum_radii}` : "");
+  } else if (r.kind === "tour") {
+    const pts = r.points || [], order = r.tour || [];
+    if (!pts.length) { cap.textContent = "tour: empty render"; return; }
+    let xmin = Infinity, xmaxb = -Infinity, ymin = Infinity, ymaxb = -Infinity;
+    for (const [x, y] of pts) {
+      xmin = Math.min(xmin, x); xmaxb = Math.max(xmaxb, x);
+      ymin = Math.min(ymin, y); ymaxb = Math.max(ymaxb, y);
+    }
+    const span = Math.max(xmaxb - xmin, ymaxb - ymin) || 1;
+    const box = Math.min(W, H) - 2 * m;
+    const tx = ([x, y]) => [
+      (W - box) / 2 + ((x - xmin) / span) * box,
+      (H + box) / 2 - ((y - ymin) / span) * box,
+    ];
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+    ctx.beginPath();
+    order.forEach((idx, i) => {
+      const [x, y] = tx(pts[idx] || [0, 0]);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    if (order.length > 2) ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = "#e8eaed";
+    for (const p of pts) {
+      const [x, y] = tx(p);
+      ctx.beginPath(); ctx.arc(x, y, 2, 0, 2 * Math.PI); ctx.fill();
+    }
+    cap.textContent = `tour through ${pts.length} points`;
+  } else {
+    cap.textContent = "unknown render kind: " + r.kind;
+  }
+}
+
+/* ---------- past runs ---------- */
+function pickFreeSlot() {
+  for (const s of Object.values(state.slots))
+    if (s.status !== "running" && s.status !== "starting") return s;
+  return null;
+}
+async function pollRuns() {
+  let runs;
+  try { runs = await (await fetch("/api/runs")).json(); } catch (e) { return; }
+  const el = $("#runstrip");
+  if (!runs.length) { el.innerHTML = '<span class="empty">no past runs</span>'; return; }
+  el.innerHTML = runs.map((r, i) => `
+    <button class="runchip" data-i="${i}">
+      <span class="rid">${esc(r.run_id)}</span>
+      <span class="st-${esc(r.status)}">${esc(r.status)}</span>
+      · best ${fmtScore(r.best)} · ${fmtUsd(r.usd)}</button>`).join("");
+  el.querySelectorAll(".runchip").forEach(btn => btn.onclick = () => {
+    const run = runs[+btn.dataset.i];
+    const slot = pickFreeSlot();
+    if (!slot) { alert("Both slots are busy — stop one first."); return; }
+    resetSlotData(slot);
+    slot.runId = run.run_id;
+    slot.config = run.config || null;
+    slot.status = "replaying";
+    renderSummary(slot);
+    setStatus(slot, "replaying " + run.run_id);
+    attach(slot);
+  });
+}
+
+/* ---------- boot ---------- */
+async function init() {
+  buildSlot("A"); buildSlot("B");
+  state.slots.A = newSlot("A"); state.slots.B = newSlot("B");
+  try {
+    state.meta = await (await fetch("/api/meta")).json();
+    buildPanel(state.meta);
+  } catch (e) {
+    $("#switches").innerHTML = '<span class="empty">failed to load /api/meta — is the server up?</span>';
+  }
+  drawChart(); renderLegend(); initHover();
+  drawSolution(state.slots.A); drawSolution(state.slots.B);
+  pollRuns();
+  setInterval(pollRuns, 10000);
+  window.addEventListener("resize", () => {
+    drawChart();
+    for (const s of Object.values(state.slots)) drawSolution(s);
+  });
+}
+init();
+</script>
+</body>
+</html>
