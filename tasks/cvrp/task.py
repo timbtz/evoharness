@@ -20,13 +20,17 @@ _INST_DIR = _DIR / "instances"
 _IMAGE, _DOCKERFILE = "evoharness-cvrp-eval", str(_DIR / "Dockerfile.eval")
 _CPUSET = "3" if (os.cpu_count() or 1) >= 4 else None  # least-contended core here
 
+# Scored splits need HEADROOM: the seed solves every small A/B/P instance to
+# optimum within budget (gap 0.0 -> saturated gate signal, nothing can ever be
+# accepted), so X instances carry train/val and the small ones are demoted to
+# the cheap every-5-gens public progress report.
 _SPLITS = {
-    "train": ["A-n32-k5", "A-n45-k6", "A-n60-k9", "B-n50-k7", "P-n55-k10"],
-    "val": ["A-n37-k6", "B-n45-k5", "P-n65-k10"],
-    "public": ["X-n101-k25", "X-n110-k13", "X-n125-k30"],
-    "private": ["X-n153-k22", "X-n200-k36", "X-n251-k28", "X-n303-k21"],
+    "train": ["X-n101-k25", "X-n110-k13", "X-n125-k30"],
+    "val": ["X-n153-k22"],
+    "public": ["A-n32-k5", "A-n45-k6", "A-n60-k9", "B-n50-k7", "P-n55-k10"],
+    "private": ["X-n200-k36", "X-n251-k28", "X-n303-k21"],
 }
-_BUDGET = {"train": 3.0, "val": 3.0, "public": 5.0, "private": 6.0}  # s/instance
+_BUDGET = {"train": 5.0, "val": 5.0, "public": 3.0, "private": 6.0}  # s/instance
 _SLACK = 15.0  # script-level hard-kill headroom: numpy import, gcc, JSON I/O
 _WALL_GRACE = 8.0  # host-side: max honest overhead beyond sum of budgets
 

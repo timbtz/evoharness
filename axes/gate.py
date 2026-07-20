@@ -23,7 +23,12 @@ class PublicOnly:
         if parent is None:
             return True
         self._ensure_score(parent)
-        return self.key(cand, pool, self.split) > self.key(parent, pool, self.split)
+        child, par = self.key(cand, pool, self.split), self.key(parent, pool, self.split)
+        if child != par:
+            return child > par
+        # exact tie: accept genuinely different code (novelty > 0) so the search
+        # can drift across score plateaus instead of freezing on the incumbent
+        return cand.meta.get("novelty", 0) > 0
 
 
 class HoldoutGate(PublicOnly):

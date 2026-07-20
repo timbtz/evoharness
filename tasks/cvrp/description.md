@@ -26,6 +26,7 @@ Return routes as lists of customer indices 1..n-1; depot 0 must not appear; orde
 within a route = visit order. Validation happens OUTSIDE the sandbox: every
 customer exactly once, per-route demand <= capacity — invalid or late => -inf.
 Score = -mean(gap%) vs best-known cost (0 = match BKS, >0 = beat it); the seed
-matches the optima on train (score ~0) and lands near -0.7 on the larger hidden
-X instances — the remaining headroom is there. Instances: CVRPLIB A/B/P
-(n=32-65) and hidden X (n=101-303).
+lands around -0.7 on the scored X instances (n=101+) — closing that gap means
+squeezing more and better search into the fixed time budget. Instances: CVRPLIB
+X (n=101-303) for scoring; small A/B/P (n=32-65, solved to optimum by the seed)
+appear only in progress reports.

@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import FileResponse, StreamingResponse  # noqa: E402
 
 from core.config import OBJECTIVES, SWITCHES, TASKS, Config  # noqa: E402
-from core.loop import run  # noqa: E402
+from core.loop import resume_code, run  # noqa: E402
 
 app = FastAPI(title="EvoHarness")
 RUNS = _ROOT / "runs"
@@ -40,6 +40,8 @@ def meta():
 def start_run(body: dict):
     try:
         cfg = Config.from_dict(body)
+        if cfg.resume_from:
+            resume_code(cfg.resume_from, cfg.task)  # fail fast: 422, not a dead run dir
     except (TypeError, ValueError) as e:
         raise HTTPException(422, str(e))
     run_id = f"{cfg.task}-s{cfg.seed}-{int(time.time() * 1000) % 10**8}"

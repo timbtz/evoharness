@@ -102,3 +102,69 @@ def test_reproducible_decisions(tmp_path):
     a = decisions(tmp_path / "a")
     b = decisions(tmp_path / "b")
     assert a == b and len(a) >= 3, (a, b)
+
+
+# 7. Compile repair: a non-compiling candidate is fixed in-conversation (writer sees
+#    the compiler's stderr) and the repaired candidate competes as the generation.
+def test_compile_repair_loop(tmp_path, monkeypatch):
+    import core.loop as loop
+    from core.candidate import EvalResult
+
+    class _Task:
+        name, description, wiki_dir = "stub", "stub task", tmp_path
+
+        def seed_code(self):
+            return "SEED"
+
+        def evaluate(self, code, split):
+            if "BROKEN" in code:
+                return EvalResult(float("-inf"),
+                                  error="RuntimeError: C compile failed:\nk.c:1:1: error: boom")
+            return EvalResult(1.0 if code == "SEED" else 2.0)
+
+        def render(self, code, result):
+            return {}
+
+    prompts = []
+
+    class _LLM(MockLLM):
+        def chat(self, model, messages, temperature, role, max_tokens=4096,
+                 tools=None, tool_handler=None):
+            self.guard.check()
+            self.guard.charge(self.COST)
+            prompts.append(messages[-1]["content"])
+            return ("```python\nBROKEN = 1\n```" if len(prompts) == 1
+                    else "```python\nFIXED = 1\n```")
+
+    monkeypatch.setattr(loop, "load_task", lambda name: _Task())
+    cfg = Config(budget={"max_usd": 1.0, "max_calls": 2, "max_seconds": 60})
+    summary = loop.run(cfg, run_dir=tmp_path / "r", llm_factory=_LLM)
+
+    assert "failed to compile" in prompts[1] and "k.c:1:1" in prompts[1]
+    cands = [json.loads(l) for l in (tmp_path / "r" / "ledger.jsonl").read_text().splitlines()
+             if json.loads(l)["type"] == "candidate"]
+    by_id = {c["id"]: c for c in cands}
+    assert by_id["c0001"]["accepted"] is False and "compile failed" in by_id["c0001"]["meta"]["error"]
+    assert by_id["c0001r1"]["accepted"] is True and by_id["c0001r1"]["meta"]["repair"] == 1
+    assert summary["best_id"] == "c0001r1"
+
+
+# 8. Resume: a new run seeded from a prior run's best accepted candidate.
+def test_resume_from_prior_run(tmp_path, monkeypatch):
+    import core.loop as loop
+    monkeypatch.setattr(loop, "_ROOT", tmp_path)
+    first = tmp_path / "runs" / "first"
+    loop.run(Config(task="binpacking", budget=TINY), run_dir=first, llm_factory=MockLLM)
+    best = (first / "best.py").read_text()
+
+    with pytest.raises(ValueError, match="no ledger"):
+        loop.resume_code("nope", "binpacking")
+    with pytest.raises(ValueError, match="is task"):
+        loop.resume_code("first", "tsp")
+
+    second = tmp_path / "runs" / "second"
+    loop.run(Config(task="binpacking", budget=TINY, resume_from="first"),
+             run_dir=second, llm_factory=MockLLM)
+    ev0 = json.loads((second / "ledger.jsonl").read_text().splitlines()[1])
+    assert ev0["id"] == "c0000" and ev0["meta"]["resume_from"] == "first"
+    assert ev0["code"] == best

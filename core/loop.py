@@ -24,6 +24,14 @@ from core.llm import LLM, parse_code
 
 _ROOT = Path(__file__).resolve().parent.parent
 PUBLIC_EVERY = 5  # generations between public-split reports
+COMPILE_REPAIRS = 2  # mandatory baseline, not an axis: a non-compiling candidate is
+# repaired in-conversation (writer sees the compiler's stderr) before the gen is spent
+
+
+def _compile_error(err: str) -> bool:
+    """C toolchain failures only: cvrp's compile_c message, or raw gcc diagnostics
+    (matmul_c). Runtime/validation errors stay ordinary evolutionary feedback."""
+    return "compile failed" in err or (".c:" in err and "error:" in err)
 
 SYSTEM = (
     "You are an expert algorithm designer evolving a function (language given by the task). "
@@ -42,6 +50,27 @@ _AXES = {
 
 def load_task(name: str):
     return importlib.import_module(f"tasks.{name}.task").TASK
+
+
+def resume_code(run_id: str, task_name: str) -> str:
+    """Best accepted candidate from a prior run's ledger (fallback: its best.py).
+    Raises ValueError so the API can reject bad requests before a run starts."""
+    d = _ROOT / "runs" / Path(run_id).name
+    if not (d / "ledger.jsonl").exists():
+        raise ValueError(f"resume_from: no ledger for run {run_id!r}")
+    best, score = "", float("-inf")
+    for ev in Ledger(d).read():
+        if ev["type"] == "run_start" and ev["config"].get("task") != task_name:
+            raise ValueError(f"resume_from: {run_id!r} is task "
+                             f"{ev['config'].get('task')!r}, not {task_name!r}")
+        if ev["type"] == "candidate" and ev.get("accepted") and ev.get("code") \
+                and ev.get("scores", {}).get("train", float("-inf")) >= score:
+            best, score = ev["code"], ev["scores"]["train"]
+    if not best and (d / "best.py").exists():
+        best = (d / "best.py").read_text()
+    if not best:
+        raise ValueError(f"resume_from: {run_id!r} has no usable candidate")
+    return best
 
 
 def make_key(objective: str):
@@ -99,7 +128,11 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     ledger.append({"type": "run_start", "config": cfg.to_dict(), "run_dir": str(run_dir)})
 
     pool = Pool()
-    seed_cand = Candidate(code=task.seed_code(), id="c0000", meta={"gen": 0, "seed": True})
+    seed_src, seed_meta = task.seed_code(), {"gen": 0, "seed": True}
+    if cfg.resume_from:
+        seed_src = resume_code(cfg.resume_from, cfg.task)
+        seed_meta["resume_from"] = cfg.resume_from
+    seed_cand = Candidate(code=seed_src, id="c0000", meta=seed_meta)
     _evaluate_into(task, seed_cand)
     ax["gate"].accept(seed_cand, pool)  # holdout gate scores val here; a broken seed is a task bug
     ax["search"].insert(pool, seed_cand)
@@ -125,13 +158,39 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                    "Output exactly one fenced code block."]
             )
             tools = ax["knowledge"].tools()
-            text = llm.chat(
-                ax["roles"].writer(),
-                [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
-                temperature=cfg.temperatures["writer"], role="writer",
-                tools=tools or None,
-                tool_handler=ax["knowledge"].call_tool if tools else None,
-            )
+            messages = [{"role": "system", "content": SYSTEM},
+                        {"role": "user", "content": prompt}]
+            for attempt in range(COMPILE_REPAIRS + 1):
+                text = llm.chat(
+                    ax["roles"].writer(), messages,
+                    temperature=cfg.temperatures["writer"], role="writer",
+                    tools=tools or None,
+                    tool_handler=ax["knowledge"].call_tool if tools else None,
+                )
+                code = parse_code(text)
+                cand = Candidate(code=code or "", parent_id=parents[0].id,
+                                 id=f"c{gen:04d}" + (f"r{attempt}" if attempt else ""),
+                                 meta={"gen": gen})
+                if attempt:
+                    cand.meta["repair"] = attempt
+                if code is None:
+                    cand.scores["train"] = float("-inf")
+                    cand.meta["error"] = "parse_error"
+                else:
+                    _evaluate_into(task, cand)
+                err = str(cand.meta.get("error", ""))
+                if attempt == COMPILE_REPAIRS or not _compile_error(err):
+                    break
+                cand.cost = {"usd": round(guard.usd, 4), "calls": guard.calls}
+                ledger.append({"type": "candidate", "accepted": False,
+                               "elapsed": round(guard.elapsed(), 1), **cand.to_dict()})
+                guard.check()
+                messages += [
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content":
+                        "Your code failed to compile:\n" + err[:1500] +
+                        "\nFix the compile error and output the complete corrected "
+                        "code in one fenced code block."}]
             failures = 0
         except BudgetExceeded as e:
             stop_reason = f"budget: {e}"
@@ -143,15 +202,6 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                 stop_reason = f"llm_error: {e}"
                 break
             continue
-
-        code = parse_code(text)
-        cand = Candidate(code=code or "", parent_id=parents[0].id, id=f"c{gen:04d}",
-                         meta={"gen": gen})
-        if code is None:
-            cand.scores["train"] = float("-inf")
-            cand.meta["error"] = "parse_error"
-        else:
-            _evaluate_into(task, cand)
         cand.cost = {"usd": round(guard.usd, 4), "calls": guard.calls}
         cand.meta["novelty"] = round(
             1 - difflib.SequenceMatcher(None, parents[0].code, cand.code).ratio(), 3)

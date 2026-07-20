@@ -266,7 +266,8 @@ function renderSummary(slot) {
     .map(([k, v]) => `<span class="sw">${esc(k)}:${esc(v)}</span>`).join("");
   const b = c.budget || {};
   el.innerHTML = `<b>${esc(c.task)}</b> · seed ${esc(c.seed)} · ${esc(c.objective)}
-    · $${esc(b.max_usd)} / ${esc(b.max_calls)} calls / ${esc(b.max_seconds)}s<br>${sw}
+    · $${esc(b.max_usd)} / ${esc(b.max_calls)} calls / ${esc(b.max_seconds)}s
+    ${c.resume_from ? `· ⟳ from <b>${esc(c.resume_from)}</b>` : ""}<br>${sw}
     ${slot.runId ? `<br>run <b>${esc(slot.runId)}</b>` : ""}`;
 }
 function setStatus(slot, text, cls) {
@@ -673,8 +674,11 @@ async function pollRuns() {
     <button class="runchip" data-i="${i}">
       <span class="rid">${esc(r.run_id)}</span>
       <span class="st-${esc(r.status)}">${esc(r.status)}</span>
-      · best ${fmtScore(r.best)} · ${fmtUsd(r.usd)}</button>`).join("");
-  el.querySelectorAll(".runchip").forEach(btn => btn.onclick = () => {
+      · best ${fmtScore(r.best)} · ${fmtUsd(r.usd)}</button>${r.status === "done" ? `
+    <button class="runchip" data-c="${i}"
+      title="start a new run (current panel config) seeded from this run's best candidate">⟳ continue</button>` : ""}`
+  ).join("");
+  el.querySelectorAll(".runchip[data-i]").forEach(btn => btn.onclick = () => {
     const run = runs[+btn.dataset.i];
     const slot = pickFreeSlot();
     if (!slot) { alert("Both slots are busy — stop one first."); return; }
@@ -685,6 +689,17 @@ async function pollRuns() {
     renderSummary(slot);
     setStatus(slot, "replaying " + run.run_id);
     attach(slot);
+  });
+  el.querySelectorAll(".runchip[data-c]").forEach(btn => btn.onclick = () => {
+    const run = runs[+btn.dataset.c];
+    const slot = pickFreeSlot();
+    if (!slot) { alert("Both slots are busy — stop one first."); return; }
+    const cfg = readConfig();
+    if (run.config && run.config.task) cfg.task = run.config.task; // task must match the resumed run
+    cfg.resume_from = run.run_id;
+    slot.config = cfg;
+    renderSummary(slot);
+    startRun(slot);
   });
 }
 

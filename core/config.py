@@ -35,6 +35,7 @@ class Config:
     )
     generations: int = 1000  # upper bound; budget stops the run first
     wiki_mode: str = "inject"  # S4=wiki_fs sub-mode: "inject" (top-k pages) | "tool" (read_wiki calls)
+    resume_from: str | None = None  # run_id: start from that run's best accepted candidate
 
     def __post_init__(self) -> None:
         if self.task not in TASKS:
