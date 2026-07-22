@@ -6,9 +6,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 SWITCHES: dict[str, tuple[str, ...]] = {
-    "feedback": ("score_only", "reflections"),
+    "feedback": ("score_only", "reflections", "memory"),
     "gate": ("public_only", "holdout"),
-    "search": ("greedy", "islands"),
+    "search": ("greedy", "islands", "staged"),
     "knowledge": ("off", "wiki_fs"),
     "roles": ("single_strong", "split_roles"),
 }

@@ -15,12 +15,13 @@ from pathlib import Path
 from axes.feedback import Reflections, ScoreOnly
 from axes.gate import HoldoutGate, PublicOnly
 from axes.knowledge import Off, WikiFS
+from axes.memory import MemoryWiki
 from axes.roles import SingleStrong, SplitRoles
-from axes.search import Greedy11, Islands
-from core.candidate import Candidate, Pool
+from axes.search import Greedy11, Islands, Staged
+from core.candidate import Candidate, Pool, PromptSection
 from core.config import Config
 from core.ledger import BudgetExceeded, BudgetGuard, Ledger
-from core.llm import LLM, parse_code
+from core.llm import LLM, parse_code, parse_idea, parse_reasoning
 
 _ROOT = Path(__file__).resolve().parent.parent
 PUBLIC_EVERY = 5  # generations between public-split reports
@@ -35,14 +36,15 @@ def _compile_error(err: str) -> bool:
 
 SYSTEM = (
     "You are an expert algorithm designer evolving a function (language given by the task). "
-    "Respond with exactly one fenced code block containing the complete improved function "
-    "and anything it needs (imports/includes/helpers). Brief reasoning before the block is fine."
+    "Start your response with one line `Idea: <one-sentence summary of the change>`, then "
+    "brief reasoning, then respond with exactly one fenced code block containing the "
+    "complete improved function and anything it needs (imports/includes/helpers)."
 )
 
 _AXES = {
-    "feedback": {"score_only": ScoreOnly, "reflections": Reflections},
+    "feedback": {"score_only": ScoreOnly, "reflections": Reflections, "memory": MemoryWiki},
     "gate": {"public_only": PublicOnly, "holdout": HoldoutGate},
-    "search": {"greedy": Greedy11, "islands": Islands},
+    "search": {"greedy": Greedy11, "islands": Islands, "staged": Staged},
     "knowledge": {"off": Off, "wiki_fs": WikiFS},
     "roles": {"single_strong": SingleStrong, "split_roles": SplitRoles},
 }
@@ -125,6 +127,7 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     llm = llm_factory(ledger, guard)
     rng = random.Random(cfg.seed)
     ax = assemble(cfg, task, llm)
+    getattr(ax["feedback"], "bind", lambda *a: None)(run_dir, ledger)
     ledger.append({"type": "run_start", "config": cfg.to_dict(), "run_dir": str(run_dir)})
 
     pool = Pool()
@@ -150,14 +153,24 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
             sections = (
                 ax["knowledge"].prompt_sections(task, hint)
                 + ax["feedback"].build_context(pool, parents, last)
+                + getattr(ax["search"], "prompt_sections", lambda: [])()
             )
+            hint_file = run_dir / "HINT"  # live user steering: edit/delete anytime
+            if hint_file.exists() and hint_file.read_text().strip():
+                sections.append(PromptSection(
+                    "Directive from the user", hint_file.read_text().strip()[:2000]))
             prompt = "\n\n".join(
                 [f"# Task\n{task.description}"]
                 + [s.render() for s in sections]
                 + ["Write an improved version of the function. Keep the exact signature. "
-                   "Output exactly one fenced code block."]
+                   "Start with one line `Idea: <one-sentence summary of your change>`, "
+                   "then brief reasoning, then exactly one fenced code block."]
             )
-            tools = ax["knowledge"].tools()
+            tools, handlers = [], {}
+            for axobj in (ax["knowledge"], ax["feedback"]):
+                for t in getattr(axobj, "tools", lambda: [])():
+                    tools.append(t)
+                    handlers[t["function"]["name"]] = axobj.call_tool
             messages = [{"role": "system", "content": SYSTEM},
                         {"role": "user", "content": prompt}]
             for attempt in range(COMPILE_REPAIRS + 1):
@@ -165,12 +178,14 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                     ax["roles"].writer(), messages,
                     temperature=cfg.temperatures["writer"], role="writer",
                     tools=tools or None,
-                    tool_handler=ax["knowledge"].call_tool if tools else None,
+                    tool_handler=(lambda n, a: handlers[n](n, a)
+                                  if n in handlers else f"unknown tool {n}") if tools else None,
                 )
                 code = parse_code(text)
                 cand = Candidate(code=code or "", parent_id=parents[0].id,
                                  id=f"c{gen:04d}" + (f"r{attempt}" if attempt else ""),
-                                 meta={"gen": gen})
+                                 meta={"gen": gen, "idea": parse_idea(text),
+                                       "reasoning": parse_reasoning(text)})
                 if attempt:
                     cand.meta["repair"] = attempt
                 if code is None:
@@ -205,7 +220,8 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
         cand.cost = {"usd": round(guard.usd, 4), "calls": guard.calls}
         cand.meta["novelty"] = round(
             1 - difflib.SequenceMatcher(None, parents[0].code, cand.code).ratio(), 3)
-        accepted = ax["gate"].accept(cand, pool)
+        accepted = getattr(ax["search"], "adopt", lambda c: False)(cand) \
+            or ax["gate"].accept(cand, pool)
         if accepted:
             ax["search"].insert(pool, cand)
         ledger.append({

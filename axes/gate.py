@@ -24,6 +24,13 @@ class PublicOnly:
             return True
         self._ensure_score(parent)
         child, par = self.key(cand, pool, self.split), self.key(parent, pool, self.split)
+        eps = getattr(self.task, "noise", {}).get(self.split, 0.0)
+        if eps and 0 < abs(child - par) <= eps:
+            # margin within eval noise (anytime tasks): re-run, decide on the median
+            scores = [cand.scores[self.split]] + [
+                self.task.evaluate(cand.code, self.split).score for _ in range(2)]
+            cand.scores[self.split] = sorted(scores)[1]
+            child = self.key(cand, pool, self.split)
         if child != par:
             return child > par
         # exact tie: accept genuinely different code (novelty > 0) so the search

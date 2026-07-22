@@ -168,3 +168,63 @@ def test_resume_from_prior_run(tmp_path, monkeypatch):
     ev0 = json.loads((second / "ledger.jsonl").read_text().splitlines()[1])
     assert ev0["id"] == "c0000" and ev0["meta"]["resume_from"] == "first"
     assert ev0["code"] == best
+
+
+# 9. Tracing: candidate records carry the writer's Idea line + reasoning preamble.
+def test_reasoning_traced(tmp_path):
+    class _LLM(MockLLM):
+        def chat(self, model, messages, temperature, role, max_tokens=4096,
+                 tools=None, tool_handler=None):
+            self.guard.check()
+            self.guard.charge(self.COST)
+            self.i += 1
+            return ("Idea: prefer smaller gaps.\nBecause ties waste bins.\n"
+                    "```python\nimport numpy as np\n"
+                    f"def priority(item, bins):\n    return -np.abs(bins - item - {self.i % 3})\n```")
+
+    cfg = Config(task="binpacking", budget=dict(TINY))
+    run(cfg, run_dir=tmp_path / "r", llm_factory=_LLM)
+    cands = [json.loads(l) for l in (tmp_path / "r" / "ledger.jsonl").read_text().splitlines()
+             if json.loads(l)["type"] == "candidate"]
+    gen1 = next(c for c in cands if c["meta"]["gen"] == 1)
+    assert gen1["meta"]["idea"] == "prefer smaller gaps."
+    assert "Because ties waste bins." in gen1["meta"]["reasoning"]
+    assert "```" not in gen1["meta"]["reasoning"]
+
+
+# 10. Memory wiki: scaffold created, reviewer fires on a new best, FILE blocks written,
+#     and the review is recorded in the ledger.
+def test_memory_wiki_review(tmp_path, monkeypatch):
+    import axes.memory
+    from axes.memory import MemoryWiki
+    monkeypatch.setattr(MemoryWiki, "REVIEW_EVERY", 3)
+    monkeypatch.setattr(axes.memory, "_ROOT", tmp_path)  # task-shared wiki under tmp
+
+    class _LLM(MockLLM):
+        def chat(self, model, messages, temperature, role, max_tokens=4096,
+                 tools=None, tool_handler=None):
+            self.guard.check()
+            self.guard.charge(self.COST)
+            if role == "reviewer":
+                return ("=== FILE: successful-patterns/gap-shift.md ===\n"
+                        "Shifting the preferred gap helps.\n"
+                        "=== FILE: ../evil.md ===\nnope\n"
+                        "=== FILE: index.md ===\n# Memory index\n"
+                        "- successful-patterns/gap-shift.md — gap shifting\n")
+            self.i += 1
+            return ("Idea: shift preferred gap.\n"
+                    "```python\nimport numpy as np\n"
+                    f"def priority(item, bins):\n    return -np.abs(bins - item - {self.i % 5})\n```")
+
+    cfg = Config(task="binpacking", budget={"max_usd": 1.0, "max_calls": 6, "max_seconds": 300},
+                 switches={"feedback": "memory", "gate": "public_only", "search": "greedy",
+                           "knowledge": "off", "roles": "single_strong"})
+    run(cfg, run_dir=tmp_path / "r", llm_factory=_LLM)
+    mem = tmp_path / "memory" / "binpacking"  # task-scoped, shared across runs
+    assert (mem / "SCHEMA.md").exists() and (mem / "index.md").exists()
+    assert (mem / "successful-patterns" / "gap-shift.md").exists()
+    assert not (tmp_path / "r" / "evil.md").exists() and not (mem / "evil.md").exists()
+    assert "gap-shift.md" in (mem / "index.md").read_text()
+    events = [json.loads(l) for l in (tmp_path / "r" / "ledger.jsonl").read_text().splitlines()]
+    reviews = [e for e in events if e["type"] == "memory_review"]
+    assert reviews and reviews[0]["files"] == ["successful-patterns/gap-shift.md", "index.md"]

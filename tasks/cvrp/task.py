@@ -188,6 +188,9 @@ class _CvrpTask:
     name = "cvrp"
     wiki_dir = _DIR / "wiki"
     description = (_DIR / "description.md").read_text()
+    # anytime eval noise (score units = gap pct pts): same code re-run varies with
+    # wall-clock slicing; gates re-run near-ties this close and take the median
+    noise = {"train": 0.02, "val": 0.05}
 
     def seed_code(self) -> str:
         from tasks.cvrp.seed import seed_code  # assembler: seed/kernel.c + seed/solver.py

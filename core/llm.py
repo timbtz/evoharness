@@ -54,6 +54,7 @@ class LLM:
             "type": "llm_call", "role": role, "model": model,
             "prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens,
             "usd": usd, "seconds": round(time.monotonic() - t0, 2),
+            "text": resp.choices[0].message.content or "",
         })
 
     def _once(self, model: str, messages: list[dict], temperature: float, role: str,
@@ -105,3 +106,15 @@ def parse_code(text: str) -> str | None:
     aloud first). A final block left unterminated by max_tokens truncation counts."""
     blocks = re.findall(r"```[\w+-]*[ \t]*\n(.*?)(?:```|\Z)", text, re.DOTALL)
     return blocks[-1].strip() if blocks else None
+
+
+def parse_reasoning(text: str) -> str:
+    """Everything before the final code block: the writer's Idea line + rationale."""
+    fences = list(re.finditer(r"```[\w+-]*[ \t]*\n", text))
+    return (text[: fences[-1].start()] if fences else text).strip()
+
+
+def parse_idea(text: str) -> str | None:
+    """The one-line `Idea:` declaration the writer contract requires."""
+    m = re.search(r"^\s*\**Idea\**\s*[:*]\s*(.+)$", text, re.MULTILINE)
+    return m.group(1).strip().strip("*") if m else None

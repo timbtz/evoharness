@@ -26,10 +26,16 @@ Below are newly gained insights:
 Write constructive hints for designing better heuristics, based on prior reflections and new insights, in less than 50 words."""
 
 
+def _per_instance(c: Candidate) -> str:
+    """Per-instance breakdown when the task provides one (e.g. cvrp gaps_pct)."""
+    gaps = (c.meta.get("metrics") or {}).get("gaps_pct")
+    return f", per-instance gap% {gaps}" if gaps else ""
+
+
 def _parent_sections(pool: Pool, parents: list[Candidate], last: Candidate | None) -> list[PromptSection]:
     out = [
         PromptSection(
-            f"Current program (train score {p.score('train'):.4f})",
+            f"Current program (train score {p.score('train'):.4f}{_per_instance(p)})",
             f"```python\n{p.code}\n```",
         )
         for p in parents
@@ -40,6 +46,13 @@ def _parent_sections(pool: Pool, parents: list[Candidate], last: Candidate | Non
             str(last.meta["error"])[:800],
         ))
     lp = pool.parent_of(last) if last is not None else None
+    if lp is not None and not last.meta.get("error") \
+            and last.score("train") < lp.score("train"):
+        out.append(PromptSection(
+            "Previous attempt scored worse and was rejected",
+            f"score {last.score('train'):.4f} vs parent {lp.score('train'):.4f}"
+            f"{_per_instance(last)} — diagnose which change hurt before trying again.",
+        ))
     if lp is not None and not last.meta.get("error") \
             and last.score("train") == lp.score("train"):
         out.append(PromptSection(
@@ -101,6 +114,10 @@ class Reflections:
                 self.long_term = self._reflect(_LT_TEMPLATE.format(
                     prior=self.long_term or "(none yet)", new=self._st,
                 ))
+                self.llm.ledger.append({
+                    "type": "reflection", "pair": list(self._pair),
+                    "short": self._st, "long": self.long_term,
+                })
             sections.append(PromptSection("Reflection", self._st))
         if self.long_term:
             sections.append(PromptSection("Accumulated advice", self.long_term))
