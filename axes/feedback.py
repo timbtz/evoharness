@@ -35,7 +35,9 @@ def _per_instance(c: Candidate) -> str:
 def _parent_sections(pool: Pool, parents: list[Candidate], last: Candidate | None) -> list[PromptSection]:
     out = [
         PromptSection(
-            f"Current program (train score {p.score('train'):.4f}{_per_instance(p)})",
+            f"Current program (train score {p.score('train'):.4f}{_per_instance(p)}"
+            + (f", 30s-val score {p.scores['val30']:.4f}" if "val30" in p.scores else "")
+            + ")",
             f"```python\n{p.code}\n```",
         )
         for p in parents

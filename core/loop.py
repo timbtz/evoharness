@@ -21,7 +21,7 @@ from axes.search import Greedy11, Islands, Staged
 from core.candidate import Candidate, Pool, PromptSection
 from core.config import Config
 from core.ledger import BudgetExceeded, BudgetGuard, Ledger
-from core.llm import LLM, parse_code, parse_idea, parse_reasoning
+from core.llm import LLM, parse_code, parse_idea, parse_prediction, parse_reasoning
 
 _ROOT = Path(__file__).resolve().parent.parent
 PUBLIC_EVERY = 5  # generations between public-split reports
@@ -37,8 +37,10 @@ def _compile_error(err: str) -> bool:
 SYSTEM = (
     "You are an expert algorithm designer evolving a function (language given by the task). "
     "Start your response with one line `Idea: <one-sentence summary of the change>`, then "
-    "brief reasoning, then respond with exactly one fenced code block containing the "
-    "complete improved function and anything it needs (imports/includes/helpers)."
+    "one line `Prediction: <which instances should improve, roughly how much, and the "
+    "mechanism — a falsifiable claim>`, then brief reasoning, then respond with exactly "
+    "one fenced code block containing the complete improved function and anything it "
+    "needs (imports/includes/helpers)."
 )
 
 _AXES = {
@@ -54,6 +56,16 @@ def load_task(name: str):
     return importlib.import_module(f"tasks.{name}.task").TASK
 
 
+def _combined(scores: dict) -> float:
+    """Selection metric for what a run RETURNS (run-end best, resume seed): mean of
+    train and val when val was scored — val is the only large-n signal, so train-only
+    selection is blind to exactly what the private split measures. Parent selection
+    inside the loop stays train-only (val must stay a holdout for the gate)."""
+    t = scores.get("train", float("-inf"))
+    v = scores.get("val")
+    return (t + v) / 2 if v is not None else t
+
+
 def resume_code(run_id: str, task_name: str) -> str:
     """Best accepted candidate from a prior run's ledger (fallback: its best.py).
     Raises ValueError so the API can reject bad requests before a run starts."""
@@ -66,8 +78,8 @@ def resume_code(run_id: str, task_name: str) -> str:
             raise ValueError(f"resume_from: {run_id!r} is task "
                              f"{ev['config'].get('task')!r}, not {task_name!r}")
         if ev["type"] == "candidate" and ev.get("accepted") and ev.get("code") \
-                and ev.get("scores", {}).get("train", float("-inf")) >= score:
-            best, score = ev["code"], ev["scores"]["train"]
+                and _combined(ev.get("scores", {})) >= score:
+            best, score = ev["code"], _combined(ev["scores"])
     if not best and (d / "best.py").exists():
         best = (d / "best.py").read_text()
     if not best:
@@ -109,6 +121,16 @@ def _evaluate_into(task, cand: Candidate, split: str = "train") -> None:
         cand.meta["error"] = res.error
 
 
+def _probe_extra_splits(task, cand: Candidate) -> None:
+    """Pareto probes (e.g. cvrp val30): scored only for ACCEPTED candidates, so the
+    per-candidate cost stays at the cheap splits while the pool still learns which
+    survivors generalize across budgets."""
+    for split in getattr(task, "extra_splits", ()):
+        res = task.evaluate(cand.code, split)
+        cand.scores[split] = res.score
+        cand.meta[f"metrics_{split}"] = res.metrics
+
+
 def _report_public(task, ledger: Ledger, best: Candidate, gen: int, guard: BudgetGuard) -> None:
     res = task.evaluate(best.code, "public")
     best.scores["public"] = res.score
@@ -138,6 +160,7 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     seed_cand = Candidate(code=seed_src, id="c0000", meta=seed_meta)
     _evaluate_into(task, seed_cand)
     ax["gate"].accept(seed_cand, pool)  # holdout gate scores val here; a broken seed is a task bug
+    _probe_extra_splits(task, seed_cand)
     ax["search"].insert(pool, seed_cand)
     ledger.append({"type": "candidate", "gen": 0, "accepted": True, **seed_cand.to_dict()})
 
@@ -164,6 +187,7 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                 + [s.render() for s in sections]
                 + ["Write an improved version of the function. Keep the exact signature. "
                    "Start with one line `Idea: <one-sentence summary of your change>`, "
+                   "then one line `Prediction: <expected effect and mechanism>`, "
                    "then brief reasoning, then exactly one fenced code block."]
             )
             tools, handlers = [], {}
@@ -185,6 +209,7 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                 cand = Candidate(code=code or "", parent_id=parents[0].id,
                                  id=f"c{gen:04d}" + (f"r{attempt}" if attempt else ""),
                                  meta={"gen": gen, "idea": parse_idea(text),
+                                       "prediction": parse_prediction(text),
                                        "reasoning": parse_reasoning(text)})
                 if attempt:
                     cand.meta["repair"] = attempt
@@ -194,18 +219,23 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                 else:
                     _evaluate_into(task, cand)
                 err = str(cand.meta.get("error", ""))
-                if attempt == COMPILE_REPAIRS or not _compile_error(err):
+                if attempt == COMPILE_REPAIRS or not (_compile_error(err) or err == "parse_error"):
                     break
                 cand.cost = {"usd": round(guard.usd, 4), "calls": guard.calls}
                 ledger.append({"type": "candidate", "accepted": False,
                                "elapsed": round(guard.elapsed(), 1), **cand.to_dict()})
                 guard.check()
-                messages += [
-                    {"role": "assistant", "content": text},
-                    {"role": "user", "content":
-                        "Your code failed to compile:\n" + err[:1500] +
-                        "\nFix the compile error and output the complete corrected "
-                        "code in one fenced code block."}]
+                followup = (
+                    "Your code failed to compile:\n" + err[:1500] +
+                    "\nFix the compile error and output the complete corrected "
+                    "code in one fenced code block."
+                ) if _compile_error(err) else (
+                    "Your response contained no fenced code block, so it could not "
+                    "be evaluated. Output the complete improved function now — "
+                    "`Idea:` line, `Prediction:` line, then exactly one fenced "
+                    "code block.")
+                messages += [{"role": "assistant", "content": text},
+                             {"role": "user", "content": followup}]
             failures = 0
         except BudgetExceeded as e:
             stop_reason = f"budget: {e}"
@@ -223,6 +253,7 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
         accepted = getattr(ax["search"], "adopt", lambda c: False)(cand) \
             or ax["gate"].accept(cand, pool)
         if accepted:
+            _probe_extra_splits(task, cand)
             ax["search"].insert(pool, cand)
         ledger.append({
             "type": "candidate", "accepted": accepted,
@@ -232,18 +263,34 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
         if gen % PUBLIC_EVERY == 0:
             _report_public(task, ledger, pool.best("train"), gen, guard)
 
-    best = pool.best("train")
-    priv = task.evaluate(best.code, "private")
+    best = max(pool.all, key=lambda c: _combined(c.scores))
+    # median of 3: single anytime private evals spread ~0.1-0.18 gap-pct pts, and a
+    # transient sandbox failure must not report -inf for a working candidate
+    evals = [task.evaluate(best.code, "private") for _ in range(3)]
+    ok = [r for r in evals if r.score > float("-inf")] or evals
+    priv = sorted(ok, key=lambda r: r.score)[len(ok) // 2]
     best.scores["private"] = priv.score
     (run_dir / "best.py").write_text(best.code)
     summary = {
         "type": "run_end", "stop_reason": stop_reason, "best_id": best.id,
-        "train": best.score("train"), "private": priv.score,
+        "train": best.score("train"), "val": best.scores.get("val"), "private": priv.score,
         "private_metrics": priv.metrics,
         "generalization_gap": round(priv.score - best.score("train"), 6),
+        "private_all": [round(r.score, 4) for r in evals],
         "usd": round(guard.usd, 4), "calls": guard.calls,
         "seconds": round(guard.elapsed(), 1),
         "render": task.render(best.code, priv),
     }
+    # second Pareto champion: best on the long-budget probe, if it's a different program
+    with30 = [c for c in pool.all if "val30" in c.scores]
+    best30 = max(with30, key=lambda c: c.scores["val30"]) if with30 else None
+    if best30 is not None and best30.id != best.id:
+        evals30 = [task.evaluate(best30.code, "private") for _ in range(3)]
+        ok30 = [r for r in evals30 if r.score > float("-inf")] or evals30
+        p30 = sorted(ok30, key=lambda r: r.score)[len(ok30) // 2]
+        (run_dir / "best30.py").write_text(best30.code)
+        summary.update(best30_id=best30.id, best30_val30=round(best30.scores["val30"], 4),
+                       best30_private=p30.score,
+                       best30_private_all=[round(r.score, 4) for r in evals30])
     ledger.append(summary)
     return summary

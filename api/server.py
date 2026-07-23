@@ -5,6 +5,7 @@ Run: uv run uvicorn api.server:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import json
+import math
 import sys
 import threading
 import time
@@ -61,7 +62,10 @@ def _summary(run_dir: Path) -> dict:
         if ev["type"] == "run_start":
             out["config"] = ev["config"]
         elif ev["type"] == "run_end":
-            out.update(status="done", best=ev.get("private"), usd=ev.get("usd"),
+            best = ev.get("private")
+            if isinstance(best, float) and not math.isfinite(best):
+                best = None  # ledger JSON allows -Infinity; strict API JSON does not
+            out.update(status="done", best=best, usd=ev.get("usd"),
                        stop_reason=ev.get("stop_reason"))
     return out
 

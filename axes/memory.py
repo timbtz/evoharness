@@ -46,27 +46,41 @@ Page format — real markdown, information-dense, no narrative filler:
 - one bullet per variant: candidate ids, what the code ACTUALLY did, score/outcome
 ## Why it worked / failed
 <grounded in the code and results, not the writer's claims — check the code; when the
-code contradicts the stated idea, record what the code really did>
+code contradicts the stated idea, record what the code really did. Where a writer's
+Prediction disagreed with the outcome, state the refuted mechanism explicitly.>
 ## Verdict
 promising | exhausted | refuted — and what a future writer should do next.
 
-index.md is the library: one line per page per section ("- file.md — what it holds"),
-plus Current best (id, scores, what the program actually is) and Open directions.
+A section may group a family into a subfolder (e.g. ineffective-approaches/c-kernel/
+oropt-variants.md) once it needs more than 2 pages; move the merged pages there and
+update the index. Keep every page under ~60 lines.
+
+index.md is the library: one line per page per section ("- file.md — what it holds",
+subfolder pages as "- sub/file.md — ..."), plus Current best (id, scores, what the
+program actually is) and Open directions. Keep index.md under ~50 lines.
 Keep facts exact (candidate ids, scores, run names). Beware eval noise: small score
 deltas are often noise — never build a claim on a single small delta.
-Rewrite pages when merging; keep each under ~80 lines.
+Rewrite pages when merging.
 Never delete index.md or this file."""
 
 _REVIEW = """You maintain the memory wiki of an evolutionary code-optimization run.
 Below: the wiki schema, the current index, existing pages, and the {n} candidate
-attempts since the last review (id, accepted?, score, error, the writer's stated idea
-and reasoning, and the candidate's CODE — full, or a unified diff vs its parent).
-Judge each attempt by its code, not by the writer's self-description. Update the wiki
-so future writers avoid repeats and build on what works; apply the COVERAGE RULE.
+attempts from run {run_id} since the last review (id, accepted?, scores, error, the
+writer's stated idea, prediction, reasoning, and the candidate's CODE — full, or a
+unified diff vs its parent).
+Judge each attempt by its code, not by the writer's self-description. Where a
+prediction and its outcome disagree, record the refuted mechanism — miscalibrations
+are the most valuable content. When citing runs, use the id {run_id} exactly; never
+invent run names. Update the wiki so future writers avoid repeats and build on what
+works; apply the COVERAGE RULE.
 
 Output ONLY updated or new files, each as:
 === FILE: <section>/<name>.md ===
 <full file content>
+
+When a page is superseded, moved, or merged away, delete the stale copy with:
+=== DELETE: <section>/<name>.md ===
+(a moved page without a DELETE leaves two contradictory copies — never do that)
 
 Always end with the rewritten index:
 === FILE: index.md ===
@@ -81,9 +95,12 @@ class MemoryWiki:
         self.task, self.llm, self.roles, self.temps = task, llm, roles, temps
         self.dir: Path | None = None
         self.pending: list[dict] = []
+        self.recent: list[dict] = []  # last N digests, survives reviews (anti-re-roll)
+        self.run_id = ""
         self.best: float | None = None  # None until the seed sets the baseline
 
     def bind(self, run_dir: Path, ledger) -> None:
+        self.run_id = Path(run_dir).name
         self.dir = _ROOT / "memory" / self.task.name  # one shared wiki per task
         for s in SECTIONS:
             (self.dir / s).mkdir(parents=True, exist_ok=True)
@@ -94,7 +111,7 @@ class MemoryWiki:
                 "# Memory index\n(empty — first review pending)\n")
 
     def _pages(self) -> list[Path]:
-        return sorted(p for s in SECTIONS for p in (self.dir / s).glob("*.md"))
+        return sorted(p for s in SECTIONS for p in (self.dir / s).glob("**/*.md"))
 
     def _digest(self, c, accepted: bool, pool: Pool) -> dict:
         code, parent = c.code or "", pool.by_id.get(c.parent_id or "")
@@ -104,8 +121,10 @@ class MemoryWiki:
                 f"parent {parent.id}", c.id, n=2))
         return {
             "id": c.id, "gen": c.meta.get("gen"), "accepted": accepted,
-            "score": c.score("train"), "error": (c.meta.get("error") or "")[:300],
+            "score": c.score("train"), "val": c.scores.get("val"),
+            "error": (c.meta.get("error") or "")[:300],
             "novelty": c.meta.get("novelty"), "idea": c.meta.get("idea"),
+            "prediction": c.meta.get("prediction"),
             "reasoning": (c.meta.get("reasoning") or "")[:2000], "code": code[:6000],
         }
 
@@ -115,14 +134,30 @@ class MemoryWiki:
             return sections  # unbound (unit use) — plain score_only behaviour
         gb = max((c.score("train") for c in pool.all), default=float("-inf"))
         if last is not None and not last.meta.get("seed"):
-            self.pending.append(self._digest(last, last.id in pool.by_id, pool))
+            d = self._digest(last, last.id in pool.by_id, pool)
+            self.pending.append(d)
             self.pending = self.pending[-self.PENDING_CAP:]
+            self.recent = (self.recent + [d])[-10:]
         new_best = self.best is not None and gb > self.best
         if self.pending and (len(self.pending) >= self.REVIEW_EVERY or new_best):
             self._review(pool)
         self.best = gb if self.best is None else max(self.best, gb)
         sections.append(PromptSection(
             "Memory wiki index", (self.dir / "index.md").read_text()))
+        if self.recent:
+            lines = [
+                f"- {d['id']} [{'ERROR' if d['error'] else ('accepted' if d['accepted'] else 'rejected')}]"
+                f" train {d['score']:.4f}"
+                + (f" val {d['val']:.4f}" if d.get("val") is not None else "")
+                + f": {(d['idea'] or '(no Idea line)')[:140]}"
+                for d in self.recent
+            ]
+            sections.append(PromptSection(
+                "Last attempts in this run (newest last)",
+                "\n".join(lines) + "\nDo NOT re-propose an equivalent of any attempt "
+                "above unless your mechanism is materially different — redundant "
+                "re-rolls of one idea between wiki reviews are this task's main "
+                "historical waste. Pick a genuinely distinct direction."))
         sections.append(PromptSection(
             "Memory access",
             "Before choosing your idea, consult the run memory: grep_memory(query) "
@@ -138,7 +173,7 @@ class MemoryWiki:
         attempts = "\n".join(str(d) for d in self.pending)
         best = pool.best("train")
         prompt = "\n\n".join([
-            _REVIEW.format(n=len(self.pending)), SCHEMA,
+            _REVIEW.format(n=len(self.pending), run_id=self.run_id or "(unknown)"), SCHEMA,
             f"## Current index\n{(self.dir / 'index.md').read_text()}",
             f"## Existing pages\n{existing}",
             f"## Current best: {best.id} train {best.score('train'):.4f}",
@@ -149,14 +184,21 @@ class MemoryWiki:
             temperature=self.temps["reflect"], role="reviewer", max_tokens=32768)
         written = []
         for path, content in re.findall(
-                r"^=== FILE: (\S+) ===\n(.*?)(?=^=== FILE: |\Z)", text, re.M | re.S):
+                r"^=== FILE: (\S+) ===\n(.*?)(?=^=== (?:FILE|DELETE): |\Z)", text, re.M | re.S):
             rel = Path(path)
             ok = str(rel) == "index.md" or (
-                len(rel.parts) == 2 and rel.parts[0] in SECTIONS
+                len(rel.parts) in (2, 3) and rel.parts[0] in SECTIONS
                 and rel.suffix == ".md" and ".." not in rel.parts)
             if ok:
+                (self.dir / rel).parent.mkdir(parents=True, exist_ok=True)
                 (self.dir / rel).write_text(content.strip() + "\n")
                 written.append(str(rel))
+        for path in re.findall(r"^=== DELETE: (\S+) ===", text, re.M):
+            rel = Path(path)  # never index.md/SCHEMA.md: only section pages
+            if len(rel.parts) in (2, 3) and rel.parts[0] in SECTIONS \
+                    and rel.suffix == ".md" and ".." not in rel.parts:
+                (self.dir / rel).unlink(missing_ok=True)
+                written.append(f"deleted:{rel}")
         self.llm.ledger.append({"type": "memory_review",
                                 "n_candidates": len(self.pending), "files": written})
         self.pending = []

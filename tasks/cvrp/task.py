@@ -25,12 +25,19 @@ _CPUSET = "3" if (os.cpu_count() or 1) >= 4 else None  # least-contended core he
 # accepted), so X instances carry train/val and the small ones are demoted to
 # the cheap every-5-gens public progress report.
 _SPLITS = {
-    "train": ["X-n101-k25", "X-n110-k13", "X-n125-k30"],
-    "val": ["X-n153-k22"],
+    "train": ["X-n101-k25", "X-n110-k13", "X-n125-k30", "X-n186-k15"],
+    # val must match private's STRUCTURE, not just size: customers-per-route (n/k)
+    # governs which mechanisms pay off (c0024 vs c0035 head-to-head, 2026-07-23).
+    # private n/k = 5.6/9.0/14.4 -> val n/k = 7.0/9.9/5.0 at n=153-242
+    "val": ["X-n153-k22", "X-n228-k23", "X-n242-k48"],
     "public": ["A-n32-k5", "A-n45-k6", "A-n60-k9", "B-n50-k7", "P-n55-k10"],
     "private": ["X-n200-k36", "X-n251-k28", "X-n303-k21"],
 }
 _BUDGET = {"train": 5.0, "val": 5.0, "public": 3.0, "private": 6.0}  # s/instance
+# anytime-generalization probe: same val instances at 30s — a second Pareto axis
+# (good-at-6s vs good-at-30s), paid only by accepted candidates (loop extra_splits)
+_SPLITS["val30"] = _SPLITS["val"]
+_BUDGET["val30"] = 30.0
 _SLACK = 15.0  # script-level hard-kill headroom: numpy import, gcc, JSON I/O
 _WALL_GRACE = 8.0  # host-side: max honest overhead beyond sum of budgets
 
@@ -43,7 +50,8 @@ _BKS = {
     "P-n55-k10": 694, "A-n37-k6": 949, "B-n45-k5": 751, "P-n65-k10": 792,
     "X-n101-k25": 27591, "X-n110-k13": 14971, "X-n125-k30": 55539,
     "X-n153-k22": 21220, "X-n200-k36": 58578, "X-n251-k28": 38684,
-    "X-n303-k21": 21736,
+    "X-n303-k21": 21736, "X-n176-k26": 47812, "X-n186-k15": 24145,
+    "X-n214-k11": 10856, "X-n228-k23": 25742, "X-n242-k48": 82751,
 }
 
 _TEMPLATE = '''import ctypes, json, os, shutil, subprocess, sys, tempfile, time, traceback
@@ -93,7 +101,15 @@ except Exception as e:
 
 def _runner(script: str, timeout: float = 30.0, mem_mb: int = 1024):
     if docker_image_ready(_IMAGE, _DOCKERFILE, str(_DIR)):
-        return run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpuset=_CPUSET)
+        res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpuset=_CPUSET)
+        if "Unable to find image" in (res.stderr or ""):
+            # image pruned externally mid-run (9 false -inf in cvrp-s5-54146615):
+            # drop the ready-cache, rebuild lazily, retry once
+            from core import sandbox
+            sandbox._DOCKER_READY.pop(_IMAGE, None)
+            if docker_image_ready(_IMAGE, _DOCKERFILE, str(_DIR)):
+                res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpuset=_CPUSET)
+        return res
     return run_python(script, timeout, mem_mb)  # CI / no-docker fallback
 
 
@@ -190,7 +206,11 @@ class _CvrpTask:
     description = (_DIR / "description.md").read_text()
     # anytime eval noise (score units = gap pct pts): same code re-run varies with
     # wall-clock slicing; gates re-run near-ties this close and take the median
-    noise = {"train": 0.02, "val": 0.05}
+    # widened 2026-07-23: semantically identical code swung train -0.0906->-0.0072
+    # (X-n125 55690/55551 bimodal attractor, wall-clock-coupled SA) — the gate must
+    # median-of-3 any margin in that band, or lucky rolls become incumbents
+    noise = {"train": 0.10, "val": 0.15}
+    extra_splits = ("val30",)  # scored for accepted candidates only (see core/loop.py)
 
     def seed_code(self) -> str:
         from tasks.cvrp.seed import seed_code  # assembler: seed/kernel.c + seed/solver.py

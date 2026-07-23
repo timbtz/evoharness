@@ -115,7 +115,7 @@ class Staged:
     The global best is never lost: pool.best() ignores branches (elitism at run end),
     and every candidate carries its branch id in meta for the ledger."""
 
-    STALL, OP_EVERY = 50, 25
+    STALL, OP_EVERY = 30, 15  # ~$0.09/cand ⇒ ~110 cands per $10 run: 50 never fired
     OPERATORS = (
         "Simplify: make the program substantially shorter and clearer without losing "
         "score. Delete mechanisms that don't pay for themselves.",

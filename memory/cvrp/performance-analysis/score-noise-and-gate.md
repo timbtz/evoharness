@@ -14,3 +14,7 @@ Single-evaluation train/val deltas smaller than ~0.1 are noise — proven by a s
 
 ## Verdict
 promising as a decision rule: treat |delta train| < 0.1 as a tie; distrust single val readings; re-evaluate would-be new bests before promoting; interpret an accepted-but-worse-train candidate as a gate artifact, not progress.
+
+## Private-eval noise (measured 2026-07-23, 3 evals of identical code each)
+- c0062: 0.626 / 0.730 / 0.809 mean-gap%; c0035: 0.581 / 0.636 / 0.680. Single private evals spread 0.1-0.18 — never compare two candidates on one private eval each.
+- Mitigations now in the harness: gate eps widened to 0.10 train / 0.15 val (median-of-3 re-run inside the band); run-end private is median-of-3; run-end/resume selection = mean(train,val), not train-only.

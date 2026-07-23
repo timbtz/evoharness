@@ -1,14 +1,27 @@
 # Proposed-but-never-scored variants (silent deaths)
 
-Several small, mechanism-backed ideas from run cvrp-s3-45465035 died before producing a score (no output or parse_error); they carry zero evidence for or against and should not be treated as refuted.
+Small, mechanism-backed ideas that died before producing a score (no output or parse_error); they carry zero evidence for or against and should not be treated as refuted.
 
 ## How it was tried
-- c0003 (no output): claimed SA acceptance defect — `cW <= cS` allegedly always true, making acceptance greedy until stall-reset — plus recreate early-pruning and Or-opt-4. The C edit never emitted a solution, so the claimed bug was neither confirmed nor fixed. First step for a retry: verify whether the defect is real before changing anything.
-- c0008 (no output): generalize Or-opt in `try_moves` to segment length 4. Small, plausible change; the implementation silently failed. Note Or-opt-4's cousin (length 1-3 extensions) was score-neutral in C (see ineffective-approaches/c-local-search-modifications.md), so expected value is modest.
-- c0010 (parse_error): demand-urgency tie-break in recreate + ruin/cooling tuned for n=200-303 specifically. Never scored. Interesting solely because it targets the large-instance regime where the real headroom lives (see performance-analysis/run-metrics.md) — but the tuning half overlaps the refuted family in sa-acceptance-and-parameter-tuning.md; only the recreate tie-break half is genuinely untested.
+- c0003 (cvrp-s3-45465035): claimed SA acceptance defect (`cW <= cS` always true). C edit silently failed.
+- c0008 (cvrp-s3-45465035): generalize Or-opt in `try_moves` to length 4. Silently failed. (Note: c0019r1 in cvrp-s11-66566581 tried this in Python and it was neutral).
+- c0010 (cvrp-s3-45465035): demand-urgency tie-break in recreate + ruin/cooling tuned for n=200-303. Never scored. (Note: the recreate half was tried in cvrp-s11-66566581 c0002 and failed).
+- c0001r2 (cvrp-s11-66566581): parse_error death. Code was completely empty.
+- c0016r1 (cvrp-s11-66566581): parse_error death. Attempted Or-opt(4, dual-anchor) in Python overlay. Truncated C code led to unterminated string literal.
+- c0017 (cvrp-s11-66566581): parse_error death. Attempted to widen C K parameter to 25 for n>=200 instances. Truncated C code. (Note: Successfully evaluated in cvrp-s13-71671014 as c0003/c0018, failed to improve).
+- c0018 (cvrp-s11-66566581): empty code/no output. Attempted Python inter-route single-segment relocate to non-KNN positions.
+- c0006, c0007, c0010 (cvrp-s13-71671014): parse_error death. Writers emitted massive full-rewrites instead of unified diffs. c0010 attempted parametric (Yellow's λ) CW savings construction. c0006 attempted interleaved Or-opt lengths.
+- c0022 (cvrp-s13-71671014): NameError death (`_unpack` undefined). Attempted to add strict cost comparisons (`if cost(cand) < cost(best)`) before accepting outputs of the multi-phase C LNS. Died because it emitted a snippet instead of a full diff. (Note: the ancestry was refuted later by c0024, which inherited the multi-phase C LNS, accepted as best, and removed cost guards).
+- c0010 (run cvrp-s17-78412700): NameError death. Emitted only `def _py_cross_exchange(...)` instead of a unified diff. Attempted inter-route CROSS-exchange (swap segments of length 1-2 between routes).
+- c0001 (run cvrp-s19-83885116): parse_error death. Attempted budget-limited KNN-filtered inter-route 2-opt* as a final polish for long routes.
+- c0005 (run cvrp-s19-83885116): parse_error death. Attempted numpy-vectorized nearest-depot-regrouping overlay to insert depot-far endpoints into KNN neighbor routes.
+- c0002r2 (cvrp-s23-89572315): parse_error death (empty code string). Attempted budget-safe second C LNS call with a different seed for large instances.
+- c0004 (cvrp-s23-89572315): SyntaxError death. Attempted polar-angle sweep construction alternative, picking the cheaper of {savings, sweep} to seed the C kernel.
+- c0005r1 (cvrp-s23-89572315): SyntaxError death. Attempted to remove broken `try_intra_3opt` to save overlay time, but accidentally deleted the entire C kernel string.
 
 ## Why it is worth keeping
-- These failed for infrastructure reasons (silent crash/hang, unparseable output), not on merit; losing them silently would bias the record toward believing they were tried.
+- These failed for infrastructure reasons, not on merit; losing them silently biases the record. 
+- However, cvrp-s11-66566581 tested the large-n recreate hypotheses and they regressed, lowering expected value.
 
 ## Verdict
-promising-to-neutral, untested. Priority order for a future writer: (1) new-ideas/persistent-c-search-state.md first — strongest mechanism; (2) c0010's demand-urgency recreate tie-break, evaluated for large-n effect; (3) c0003's SA claim, verification only; (4) c0008's Or-opt-4, lowest value. Implement each unbundled.
+promising-to-neutral, mostly untested. Priority order: (1) c0003's SA claim, verification only. (2) c0010's inter-route cross-exchange. (3) c0005's depot-distance regrouping.

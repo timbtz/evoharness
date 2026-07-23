@@ -94,10 +94,12 @@ class LLM:
                 return msg.content or ""
             messages.append(msg.model_dump(exclude_none=True))
             for tc in msg.tool_calls:
-                messages.append({
-                    "role": "tool", "tool_call_id": tc.id,
-                    "content": tool_handler(tc.function.name, json.loads(tc.function.arguments or "{}")),
+                result = tool_handler(tc.function.name, json.loads(tc.function.arguments or "{}"))
+                self.ledger.append({
+                    "type": "tool_call", "role": role, "name": tc.function.name,
+                    "args": (tc.function.arguments or "")[:300], "result_chars": len(result),
                 })
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
         return msg.content or ""
 
 
@@ -117,4 +119,10 @@ def parse_reasoning(text: str) -> str:
 def parse_idea(text: str) -> str | None:
     """The one-line `Idea:` declaration the writer contract requires."""
     m = re.search(r"^\s*\**Idea\**\s*[:*]\s*(.+)$", text, re.MULTILINE)
+    return m.group(1).strip().strip("*") if m else None
+
+
+def parse_prediction(text: str) -> str | None:
+    """The one-line `Prediction:` declaration: expected effect + mechanism."""
+    m = re.search(r"^\s*\**Prediction\**\s*[:*]\s*(.+)$", text, re.MULTILINE)
     return m.group(1).strip().strip("*") if m else None
