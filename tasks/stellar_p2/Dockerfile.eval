@@ -1,0 +1,13 @@
+# Scoring container for the stellar_p2 task: python 3.12 + constellaration 0.2.6
+# (pinned — a version bump changes scores) + nevergrad for candidate optimizers.
+# booz-xform is sdist-only: needs cmake/ninja/libnetcdf to build.
+# Built lazily by core.sandbox.docker_image_ready as image "evoharness-stellar-eval".
+FROM python:3.12-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc g++ cmake ninja-build libnetcdf-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "constellaration==0.2.6" nevergrad
+# single-threaded evals: parallelism lives ACROSS containers, never inside one
+ENV OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+    XLA_FLAGS=--xla_force_host_platform_device_count=1 JAX_PLATFORMS=cpu

@@ -654,6 +654,34 @@ function drawSolution(slot) {
     ctx.beginPath(); ctx.arc(dx, dy, 4, 0, 2 * Math.PI); ctx.fill();
     cap.textContent = `${routes.length} routes, ${pts.length - 1} customers` +
       (r.mean_gap_pct != null ? ` · gap ${r.mean_gap_pct}%` : "");
+  } else if (r.kind === "stellarator") {
+    const secs = r.sections || [];
+    if (!secs.length) { cap.textContent = "stellarator: no boundary yet"; return; }
+    let rmin = Infinity, rmax = -Infinity, zmin = Infinity, zmax = -Infinity;
+    for (const s of secs) {
+      for (const v of s.r) { rmin = Math.min(rmin, v); rmax = Math.max(rmax, v); }
+      for (const v of s.z) { zmin = Math.min(zmin, v); zmax = Math.max(zmax, v); }
+    }
+    const span = Math.max(rmax - rmin, zmax - zmin) || 1;
+    const box = Math.min(W, H) - 2 * m;
+    const tx = (rr, zz) => [
+      (W - box) / 2 + ((rr - rmin) / span) * box,
+      (H + box) / 2 - ((zz - zmin) / span) * box,
+    ];
+    ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+    secs.forEach((s, si) => {
+      ctx.strokeStyle = `hsl(${200 + si * 40} 60% ${65 - si * 8}%)`;
+      ctx.beginPath();
+      for (let i = 0; i < s.r.length; i++) {
+        const [x, y] = tx(s.r[i], s.z[i]);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath(); ctx.stroke();
+    });
+    const feas = r.feasibility;
+    cap.textContent = `boundary cross-sections φ=0..π/${r.nfp || "?"}` +
+      (r.p2_score != null ? ` · P2 ${(+r.p2_score).toFixed(4)}` : "") +
+      (feas != null ? ` · max viol ${(+feas).toFixed(3)}${feas <= 0.01 ? " ✓feasible" : ""}` : "");
   } else {
     cap.textContent = "unknown render kind: " + r.kind;
   }

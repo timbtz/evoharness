@@ -34,7 +34,13 @@ class PublicOnly:
         if child != par:
             return child > par
         # exact tie: accept genuinely different code (novelty > 0) so the search
-        # can drift across score plateaus instead of freezing on the incumbent
+        # can drift across score plateaus instead of freezing on the incumbent —
+        # but a tie on the gated split must not smuggle in a train regression
+        # (s37: val-tie band admitted train -0.59; §6.3)
+        if self.split != "train":
+            tr_eps = getattr(self.task, "noise", {}).get("train", 0.0)
+            if cand.score("train") < parent.score("train") - tr_eps:
+                return False
         return cand.meta.get("novelty", 0) > 0
 
 

@@ -82,13 +82,20 @@ class LLM:
         raise last_err
 
     def chat(self, model: str, messages: list[dict], temperature: float, role: str,
-             max_tokens: int = 16384, tools: list | None = None, tool_handler=None) -> str:
+             max_tokens: int = 16384, tools: list | None = None, tool_handler=None,
+             rounds: int = 3) -> str:
         """One metered chat exchange. `role` (writer/reflect/judge) is for ledger attribution.
-        With `tools`, runs a bounded tool loop (max 3 rounds) using `tool_handler(name, args)`."""
+        With `tools`, runs a bounded tool loop (max `rounds`) using `tool_handler(name, args)`."""
         self.guard.check()
         messages = list(messages)
-        for round_ in range(3):
-            use_tools = tools if (tools and round_ < 2) else None
+        for round_ in range(rounds):
+            use_tools = tools if (tools and round_ < rounds - 1) else None
+            if tools and not use_tools and round_ > 0:
+                # the model only reaches here after burning every tool round; without
+                # this it often emits a "let me check..." fragment and no answer
+                messages.append({"role": "user", "content":
+                                 "Tool rounds are exhausted — no more tool calls are "
+                                 "possible. Produce your complete final answer now."})
             msg = self._once(model, messages, temperature, role, max_tokens, use_tools)
             if not (use_tools and msg.tool_calls):
                 return msg.content or ""

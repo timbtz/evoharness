@@ -35,3 +35,24 @@ per-module "what we take / from where / what we simplify" log.
   (PyVRP studied for benchmark conventions only).
 
 No GPL/AGPL code was used.
+
+- **ConStellaration** (proximafusion/constellaration, MIT; arXiv 2506.19583):
+  benchmark package pinned at 0.2.6 inside the `evoharness-stellar-eval` docker
+  image; P2 problem definition, forward model, NAE/rotating-ellipse initial
+  guesses used as-is via the public API (`tasks/stellar_p2/`). The seed
+  optimizer's per-mode exponential step damping (spectrum scaling 1.5) and
+  feasibility-first shaping are adapted from the repo's MIT-licensed
+  `optimization_examples/` ALM scripts (studied, no code copied). VMEC++
+  (proximafusion/vmecpp, MIT) is used indirectly through constellaration.
+  Dataset/leaderboard: huggingface.co/proxima-fusion (individual submissions
+  only, no bulk redistribution).
+
+- **ConStellaration P2 seed bank** (`tasks/stellar_p2/seed_bank.json`): 12
+  boundary configurations from the PUBLIC per-submission results dataset of
+  the ConStellaration benchmark (Hugging Face, proxima-fusion; cached
+  2026-07-23), with per-seed provenance (submitter username, submission time,
+  official score). Used as optional optimizer seeds (`fm.seed_bank`) from
+  2026-07-24 on. Any result derived from these seeds is "refined from public
+  leaderboard submissions", never "from scratch", and any actual leaderboard
+  submission from such a lineage must disclose this. submit_export.py records
+  the distance to the nearest bank seed and refuses near-copies.

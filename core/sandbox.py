@@ -108,9 +108,9 @@ def docker_image_ready(image: str, dockerfile: str | None = None,
 
 def run_python_docker(code: str, timeout: float = 30.0, mem_mb: int = 1024,
                       image: str = "python:3.13-slim",
-                      cpuset: str | None = None) -> SandboxResult:
-    """Run `code` as a python script in a throwaway container: no network, 1 CPU
-    (optionally pinned via `cpuset` for stable wall-clock budgets), memory cap.
+                      cpuset: str | None = None, cpus: int = 1) -> SandboxResult:
+    """Run `code` as a python script in a throwaway container: no network, `cpus`
+    CPUs (optionally pinned via `cpuset` for stable wall-clock budgets), memory cap.
     Check docker_image_ready() first; a docker-level failure surfaces as rc != 0."""
     tmp = tempfile.mkdtemp(prefix="evoh_")
     name = f"evoh-{os.path.basename(tmp)}"
@@ -119,7 +119,7 @@ def run_python_docker(code: str, timeout: float = 30.0, mem_mb: int = 1024,
             f.write(code)
         os.chmod(tmp, 0o755)
         cmd = ["docker", "run", "--rm", "--name", name, "--network", "none",
-               "--cpus", "1", "--memory", f"{mem_mb}m", "--memory-swap", f"{mem_mb}m",
+               "--cpus", str(cpus), "--memory", f"{mem_mb}m", "--memory-swap", f"{mem_mb}m",
                "--pids-limit", "256", "--cap-drop", "ALL",
                "--security-opt", "no-new-privileges",
                "-v", f"{tmp}:/work:ro", "-w", "/work"]

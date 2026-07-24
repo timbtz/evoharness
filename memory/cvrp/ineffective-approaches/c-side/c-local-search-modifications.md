@@ -8,13 +8,14 @@ Extending the C local search's move set (extra Or-opt lengths/orientations, ejec
 - Exotic moves: c0011/c0011r1 (Or-opt "ejection chain" 3-for-2 trade; compile-fixed to -0.098 — neutral), c0023 (4-opt EAX-style cross-exchange + randomized scan order, -6.75, worst score of the run).
 - Perf refactor: c0016 (neighbor-list row-major restructure of try_moves, -0.0906, accepted — exact tie, i.e. no measurable speed dividend).
 - c0017 (cvrp-s11-66566581): tried widening K to 25 for n>=200, died from parse error.
-- c0003/c0018 (cvrp-s13-71671014): widened C kernel `K = n - 2 < 25 ? n - 2 : 25` (or guarded `n >= 200`). c0003 train -0.0158 / val -0.24, c0018 train -0.134 / val -0.375. Higher move density failed to yield gains and likely just disrupted the SA state.
-- c0002 (run cvrp-s19-83885116): widened C LNS KNN parameter `K = 30` for `n >= 150`. Train -0.1752, val -0.4278. Disrupted SA trajectory via excessive candidate scanning.
+- c0003/c0018 (cvrp-s13-71671014): widened C kernel `K = n - 2 < 25 ? n - 2 : 25`. c0003 train -0.0158 / val -0.24, c0018 train -0.134 / val -0.375. Disrupted SA trajectory.
+- c0002 (run cvrp-s19-83885116): widened C LNS KNN parameter `K = 30` for `n >= 150`. Train -0.1752, val -0.4278. Disrupted SA trajectory.
+- c0010 (run cvrp-s29-99479842): Added intra-route 3-opt to Python, but accidentally edited C kernel distance check from `D(u, v)` to `(u, v)` in the diff. Train -5.280, val -4.856.
 
 ## Why it failed
 - The existing granular neighborhood (relocate/Or-opt-1..3/swap/2-opt/2-opt* over KNN with don't-look bits) already reaches the same local optima; added moves either never fire (identical costs) or interact badly with the SA trajectory.
 - Every change here re-rolls the timing/RNG dice: observed deltas (+/-0.01..0.1) match the noise floor.
-- The catastrophic cases (c0023) show inter-route surgery in C is far riskier than its Python-overlay twin, which merely wastes time.
+- The catastrophic cases (c0023, c0010) show inter-route surgery in C is far riskier than its Python-overlay twin, which merely wastes time.
 
 ## Verdict
 exhausted. Do not add moves to or refactor try_moves expecting train gains. Only revisit if targeting n>=200 behavior specifically AND with repeated evals; a single good train score proves nothing.

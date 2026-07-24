@@ -133,8 +133,8 @@ def test_compile_repair_loop(tmp_path, monkeypatch):
             self.guard.check()
             self.guard.charge(self.COST)
             prompts.append(messages[-1]["content"])
-            return ("```python\nBROKEN = 1\n```" if len(prompts) == 1
-                    else "```python\nFIXED = 1\n```")
+            return ("Idea: break it\n```python\nBROKEN = 1\n```" if len(prompts) == 1
+                    else "Idea: fix it\n```python\nFIXED = 1\n```")
 
     monkeypatch.setattr(loop, "load_task", lambda name: _Task())
     cfg = Config(budget={"max_usd": 1.0, "max_calls": 2, "max_seconds": 60})
@@ -228,3 +228,254 @@ def test_memory_wiki_review(tmp_path, monkeypatch):
     events = [json.loads(l) for l in (tmp_path / "r" / "ledger.jsonl").read_text().splitlines()]
     reviews = [e for e in events if e["type"] == "memory_review"]
     assert reviews and reviews[0]["files"] == ["successful-patterns/gap-shift.md", "index.md"]
+
+
+# 12. Web researcher (knowledge=web): fires on the candidate cadence, runs the
+#     question -> tool-session -> synthesis map-reduce offline (web mocked), writes only
+#     namespaced new-ideas/web-*.md pages, appends them to the index, ledgers provenance.
+def test_web_researcher(tmp_path, monkeypatch):
+    import axes.memory
+    import axes.research
+    from axes.research import Researcher
+    from axes.roles import SingleStrong
+    from core.candidate import Candidate, Pool
+    from core.ledger import BudgetGuard, Ledger
+
+    with pytest.raises(ValueError, match="requires feedback=memory"):
+        Config(switches={"feedback": "score_only", "knowledge": "web"})
+
+    monkeypatch.setattr(axes.memory, "_ROOT", tmp_path)
+    monkeypatch.setattr(Researcher, "EVERY", 3)
+    monkeypatch.setattr(axes.research, "web_search",
+                        lambda q, count=8: [{"title": "Ant colony trails",
+                                             "url": "https://x.test/ants", "snippet": "S"}])
+    monkeypatch.setattr(axes.research, "fetch_url", lambda u, cap=8000: "PAGE TEXT")
+
+    ledger = Ledger(tmp_path / "r")
+
+    class _LLM(MockLLM):
+        def chat(self, model, messages, temperature, role, max_tokens=4096,
+                 tools=None, tool_handler=None, rounds=3):
+            self.guard.check()
+            self.guard.charge(self.COST)
+            assert role == "researcher"
+            if tools:  # per-question session: exercise both tools through the handler
+                assert "https://x.test/ants" in tool_handler("web_search", {"query": "q"})
+                assert tool_handler("fetch_url", {"url": "https://x.test/ants"}) == "PAGE TEXT"
+                return "notes: pheromone-style edge scoring (https://x.test/ants)"
+            if "QUESTION" in messages[-1]["content"]:
+                return "QUESTION: how do ant colonies balance route loads?"
+            return ("=== FILE: new-ideas/web-ant-routing.md ===\n# Ant routing\n"
+                    "Pheromone-decay edge scores could guide ruin selection.\n"
+                    "## Sources\n- https://x.test/ants\n"
+                    "=== FILE: new-ideas/../evil.md ===\nnope\n"
+                    "=== FILE: successful-patterns/web-fake.md ===\nnope\n")
+
+    class _Task:
+        name, description, wiki_dir = "binpacking", "stub task", tmp_path
+
+    mem = tmp_path / "memory" / "binpacking"
+    (mem / "new-ideas").mkdir(parents=True)
+    (mem / "index.md").write_text("# Memory index\n")
+
+    r = Researcher()
+    r.bind(_Task(), _LLM(ledger, BudgetGuard(max_usd=1.0, max_calls=20, max_seconds=60)),
+           SingleStrong({"strong": "m", "cheap": "m"}), {"reflect": 0.4}, ledger)
+    pool = Pool()
+    for i in range(3):  # EVERY=3 rejected candidates -> one research session
+        r.observe(pool, Candidate(code="x", id=f"c{i}", meta={"gen": i + 1}), accepted=False)
+
+    assert (mem / "new-ideas" / "web-ant-routing.md").exists()
+    assert not (mem / "evil.md").exists() and not list((mem / "new-ideas").glob("evil*"))
+    assert not (mem / "successful-patterns" / "web-fake.md").exists()
+    assert "web-ant-routing.md" in (mem / "index.md").read_text()
+    events = [json.loads(l) for l in (tmp_path / "r" / "ledger.jsonl").read_text().splitlines()]
+    research = [e for e in events if e["type"] == "research"]
+    assert research and research[0]["files"] == ["new-ideas/web-ant-routing.md"]
+    assert "https://x.test/ants" in research[0]["sources"]
+    assert research[0]["questions"] == ["how do ant colonies balance route loads?"]
+    assert r.sessions == 1 and not [e for e in events if e["type"] == "research_error"]
+
+
+# ---- stellar_p2 golden tests (Briefing MS0) --------------------------------
+
+def _stellar_ready():
+    from tasks.stellar_p2 import task as st
+    return st.docker_image_ready(st._IMAGE, st._DOCKERFILE, str(st._DIR))
+
+
+TRIVIAL_STELLAR = '''
+def solve(fm, rng):
+    b = fm.seed_nae(aspect_ratio=9.0, max_elongation=4.0, rotational_transform=0.9,
+                    mirror_ratio=0.2, n_field_periods=3, max_poloidal_mode=1,
+                    max_toroidal_mode=1)
+    fm.eval(b)
+    return b
+'''
+
+
+# 13a. Deterministic sim: identical double-eval, bit-identical score + metrics.
+def test_stellar_deterministic(monkeypatch):
+    if not _stellar_ready():
+        pytest.skip("stellar docker image unavailable")
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setitem(st._TRAIN, "max_evals", 3)
+    a = st.TASK.evaluate(TRIVIAL_STELLAR, "train")
+    b = st.TASK.evaluate(TRIVIAL_STELLAR, "train")
+    assert a.error is None, a.error
+    ka = {k: v for k, v in a.metrics.items() if k != "seconds_used"}
+    kb = {k: v for k, v in b.metrics.items() if k != "seconds_used"}
+    assert (a.score, ka) == (b.score, kb)
+    assert a.metrics["evals_used"] == 1 and a.score < 0  # NAE seed is infeasible
+
+
+# 13b. Crash boundaries: fm.eval survives them in-candidate; a garbage RETURNED
+# boundary scores -inf with the simulator's error string.
+def test_stellar_crash_paths(monkeypatch):
+    if not _stellar_ready():
+        pytest.skip("stellar docker image unavailable")
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setitem(st._TRAIN, "max_evals", 4)
+    inside = '''
+def solve(fm, rng):
+    bad = {"r_cos": [[0.0, 1.0, 0.0]], "z_sin": [[0.0, 0.0, 0.0]], "n_field_periods": 3}
+    assert fm.eval(bad) is None and fm.last_error, "crash must yield None + reason"
+    b = fm.seed_nae(aspect_ratio=9.0, max_elongation=4.0, rotational_transform=0.9,
+                    mirror_ratio=0.2, n_field_periods=3, max_poloidal_mode=1,
+                    max_toroidal_mode=1)
+    fm.eval(b)
+    return b
+'''
+    r = st.TASK.evaluate(inside, "train")
+    assert r.error is None and r.metrics["evals_used"] == 2, (r.error, r.metrics)
+    returned_garbage = '''
+def solve(fm, rng):
+    return {"r_cos": [[0.0, 1.0, 0.0]], "z_sin": [[0.0, 0.0, 0.0]], "n_field_periods": 3}
+'''
+    r = st.TASK.evaluate(returned_garbage, "train")
+    assert r.score == float("-inf") and r.error, r.error
+
+
+# 13c. Budget metering: fm.eval stops returning at max_evals.
+def test_stellar_budget_metering(monkeypatch):
+    if not _stellar_ready():
+        pytest.skip("stellar docker image unavailable")
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setitem(st._TRAIN, "max_evals", 4)
+    greedy = '''
+def solve(fm, rng):
+    b = fm.seed_nae(aspect_ratio=9.0, max_elongation=4.0, rotational_transform=0.9,
+                    mirror_ratio=0.2, n_field_periods=3, max_poloidal_mode=1,
+                    max_toroidal_mode=1)
+    n = 0
+    while fm.eval(b) is not None:
+        n += 1
+    assert fm.remaining() <= 0 and "exhausted" in fm.last_error
+    return b
+'''
+    r = st.TASK.evaluate(greedy, "train")
+    assert r.error is None and r.metrics["evals_used"] == 4, (r.error, r.metrics)
+
+
+# 13d. CPU kill: a candidate that ignores the deadline is killed at the host
+# timeout and scored -inf, like any sandbox timeout.
+def test_stellar_cpu_kill(monkeypatch):
+    if not _stellar_ready():
+        pytest.skip("stellar docker image unavailable")
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setitem(st._TRAIN, "cpu_budget", 5.0)
+    monkeypatch.setattr(st, "_SLACK", 40.0)
+    r = st.TASK.evaluate("def solve(fm, rng):\n    \n    while True: pass\n", "train")
+    assert r.score == float("-inf") and "timeout" in (r.error or ""), r.error
+
+
+# 13e. Seed optimizer improves feasibility beyond the raw NAE portfolio even on
+# a reduced budget (raw seeds sit around shaped -0.9..-1.1).
+def test_stellar_seed_improves(monkeypatch):
+    if not _stellar_ready():
+        pytest.skip("stellar docker image unavailable")
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setitem(st._TRAIN, "max_evals", 25)
+    r = st.TASK.evaluate(st.TASK.seed_code(), "train")
+    assert r.error is None, r.error
+    assert r.score > -0.9, (r.score, r.metrics)
+    assert r.metrics["evals_used"] == 25
+
+
+# 13f. Official high-fidelity evaluate reproduces the spike-era numbers for the
+# known NAE boundary (feasibility ~1.11, score exactly 0). ~90 s: opt-in.
+def test_stellar_official_highfid(monkeypatch):
+    import os
+    if not os.environ.get("STELLAR_SLOW"):
+        pytest.skip("set STELLAR_SLOW=1 to run the ~90s official evaluate test")
+    if not _stellar_ready():
+        pytest.skip("stellar docker image unavailable")
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setitem(st._TRAIN, "max_evals", 3)
+    st.TASK.evaluate(TRIVIAL_STELLAR, "train")
+    r = st.TASK.evaluate(TRIVIAL_STELLAR, "private")
+    assert r.error is None and r.metrics.get("official") is True
+    assert r.score == 0.0 and 1.05 < r.metrics["feasibility"] < 1.17, r.metrics
+
+
+# 14. Archive: near-frontier boundaries dedupe by rounded-coefficient key.
+def test_stellar_archive_dedupe(tmp_path, monkeypatch):
+    from tasks.stellar_p2 import task as st
+    monkeypatch.setattr(st, "_ARCHIVE", tmp_path / "archive.jsonl")
+    t = st._StellarP2Task.__new__(st._StellarP2Task)
+    t._bcache, t._arch_keys, t._arch_best = {}, None, float("-inf")
+    b = {"r_cos": [[0.0, 1.0, -0.04]], "z_sin": [[0.0, 0.0, -0.15]],
+         "n_field_periods": 3}
+    b_dup = json.loads(json.dumps(b))
+    b_dup["r_cos"][0][2] += 1e-6  # inside the 1e-4 rounding -> same key
+    b_new = json.loads(json.dumps(b))
+    b_new["r_cos"][0][2] = 0.09
+    t._archive([{"shaped": -0.5, "boundary": b}], "aaa", "very_low_fidelity")
+    t._archive([{"shaped": -0.4, "boundary": b_dup}], "bbb", "very_low_fidelity")
+    t._archive([{"shaped": -0.3, "boundary": b_new}], "ccc", "very_low_fidelity")
+    t._archive([{"shaped": -0.6, "boundary": b_new}], "ddd", "very_low_fidelity")
+    lines = [json.loads(l) for l in (tmp_path / "archive.jsonl").read_text().splitlines()]
+    assert [e["code_sha"] for e in lines] == ["aaa", "ccc"]  # dup + regression dropped
+
+
+# 15. Gate tie-band (§6.3): a val-tie with a train regression is rejected.
+def test_gate_val_tie_rejects_train_regression():
+    from axes.gate import HoldoutGate
+    from core.candidate import Candidate, Pool
+
+    class _T:
+        noise = {"train": 0.1}
+
+        def evaluate(self, code, split):
+            raise AssertionError("no evals expected")
+
+    gate = HoldoutGate(_T(), lambda c, pool, split="train": c.score(split))
+    pool = Pool()
+    parent = Candidate(code="a", id="p", scores={"train": -1.0, "val": -2.0})
+    pool.add(parent)
+    reg = Candidate(code="b", id="c1", parent_id="p",
+                    scores={"train": -1.5, "val": -2.0}, meta={"novelty": 0.5})
+    assert gate.accept(reg, pool) is False          # tie on val, train regressed
+    ok = Candidate(code="c", id="c2", parent_id="p",
+                   scores={"train": -1.05, "val": -2.0}, meta={"novelty": 0.5})
+    assert gate.accept(ok, pool) is True            # train within noise band
+
+
+# 16. Memory index guard (§6.1): pages dropped from index.md get re-appended.
+def test_memory_index_guard(tmp_path, monkeypatch):
+    import axes.memory as am
+    monkeypatch.setattr(am, "_ROOT", tmp_path)
+
+    class _T:
+        name = "guardtask"
+
+    mem = am.MemoryWiki(_T(), None, None, {})
+    mem.bind(tmp_path / "runs" / "r1", None)
+    (mem.dir / "new-ideas" / "kept.md").write_text("# kept\n")
+    (mem.dir / "new-ideas" / "dropped.md").write_text("# dropped\n")
+    (mem.dir / "index.md").write_text("# Memory index\n- new-ideas/kept.md — x\n")
+    restored = mem._index_guard()
+    assert restored == ["new-ideas/dropped.md"]
+    idx = (mem.dir / "index.md").read_text()
+    assert "new-ideas/dropped.md" in idx and "index guard" in idx
+    assert mem._index_guard() == []  # idempotent

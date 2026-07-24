@@ -9,6 +9,7 @@ Changing the simulated-annealing acceptance (removing, tightening, "fixing") or 
 - c0030 (-0.096): tightened SA acceptance + persistent best-tracking + Python 2-opt cleanup — score-neutral.
 - c0033 (-4.96): "fixed" per-instance temperature scaling (near-zero `total` guard) + widened 2-opt + ruin spread — catastrophic; the temperature rescale broke acceptance across all three instances.
 - c0029 (-0.098): 20% randomized recreate + larger perturbation range — neutral (also listed under diversification-perturbations.md).
+- c0010 (cvrp-s23-89572315): Shifted second C call parameters (lowered `avg_dem` cost threshold from 1.5x to 1.2x, changed `f0` SA temp from 0.0 to 0.3) to trigger early restarts. Train -0.131, val -0.256. Rejected for noise.
 
 ## Why it failed
 - The incumbent's SA-lite schedule (cooling over elapsed fraction) is co-tuned with ruin sizes and the 5s budget; any single-knob change either does nothing (within eval noise, see performance-analysis/score-noise-and-gate.md) or destabilizes acceptance badly.

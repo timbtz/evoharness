@@ -9,11 +9,11 @@ SWITCHES: dict[str, tuple[str, ...]] = {
     "feedback": ("score_only", "reflections", "memory"),
     "gate": ("public_only", "holdout"),
     "search": ("greedy", "islands", "staged"),
-    "knowledge": ("off", "wiki_fs"),
+    "knowledge": ("off", "wiki_fs", "web"),
     "roles": ("single_strong", "split_roles"),
 }
 OBJECTIVES = ("quality", "quality_per_dollar", "time_capped")
-TASKS = ("binpacking", "circles", "tsp", "matmul_c", "cvrp")
+TASKS = ("binpacking", "circles", "tsp", "matmul_c", "cvrp", "stellar_p2")
 
 
 @dataclass
@@ -36,6 +36,8 @@ class Config:
     generations: int = 1000  # upper bound; budget stops the run first
     wiki_mode: str = "inject"  # S4=wiki_fs sub-mode: "inject" (top-k pages) | "tool" (read_wiki calls)
     resume_from: str | None = None  # run_id: start from that run's best accepted candidate
+    refiner: str | None = None  # claude model id: each writer candidate gets a headless
+    # Claude v2 refinement pass (evaluated + gated like any candidate; id suffix "f")
 
     def __post_init__(self) -> None:
         if self.task not in TASKS:
@@ -46,6 +48,9 @@ class Config:
             val = self.switches.setdefault(axis, opts[0])
             if val not in opts:
                 raise ValueError(f"switch {axis}={val!r}, expected one of {opts}")
+        if self.switches["knowledge"] == "web" and self.switches["feedback"] != "memory":
+            raise ValueError("knowledge=web requires feedback=memory "
+                             "(research pages are delivered via the memory wiki)")
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":

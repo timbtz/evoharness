@@ -71,8 +71,8 @@ unified diff vs its parent).
 Judge each attempt by its code, not by the writer's self-description. Where a
 prediction and its outcome disagree, record the refuted mechanism — miscalibrations
 are the most valuable content. When citing runs, use the id {run_id} exactly; never
-invent run names. Update the wiki so future writers avoid repeats and build on what
-works; apply the COVERAGE RULE.
+invent run names — the only run ids that exist are: {run_ids}. Update the wiki so
+future writers avoid repeats and build on what works; apply the COVERAGE RULE.
 
 Output ONLY updated or new files, each as:
 === FILE: <section>/<name>.md ===
@@ -98,6 +98,19 @@ class MemoryWiki:
         self.recent: list[dict] = []  # last N digests, survives reviews (anti-re-roll)
         self.run_id = ""
         self.best: float | None = None  # None until the seed sets the baseline
+        self._noted: set[str] = set()  # digest dedupe: refiner gens add 2 cands/gen
+
+    def note(self, cand, pool: Pool) -> None:
+        """Digest one candidate into pending/recent exactly once. Called for
+        `last` each generation, and directly by the loop for the writer
+        candidate when a refiner v2 will displace it as `last`."""
+        if self.dir is None or cand.meta.get("seed") or cand.id in self._noted:
+            return
+        self._noted.add(cand.id)
+        d = self._digest(cand, cand.id in pool.by_id, pool)
+        self.pending.append(d)
+        self.pending = self.pending[-self.PENDING_CAP:]
+        self.recent = (self.recent + [d])[-10:]
 
     def bind(self, run_dir: Path, ledger) -> None:
         self.run_id = Path(run_dir).name
@@ -133,11 +146,8 @@ class MemoryWiki:
         if self.dir is None:
             return sections  # unbound (unit use) — plain score_only behaviour
         gb = max((c.score("train") for c in pool.all), default=float("-inf"))
-        if last is not None and not last.meta.get("seed"):
-            d = self._digest(last, last.id in pool.by_id, pool)
-            self.pending.append(d)
-            self.pending = self.pending[-self.PENDING_CAP:]
-            self.recent = (self.recent + [d])[-10:]
+        if last is not None:
+            self.note(last, pool)
         new_best = self.best is not None and gb > self.best
         if self.pending and (len(self.pending) >= self.REVIEW_EVERY or new_best):
             self._review(pool)
@@ -172,8 +182,11 @@ class MemoryWiki:
             for p in self._pages()) or "(no pages yet)"
         attempts = "\n".join(str(d) for d in self.pending)
         best = pool.best("train")
+        known = sorted(p.name for p in (_ROOT / "runs").iterdir() if p.is_dir()) \
+            if (_ROOT / "runs").is_dir() else []
         prompt = "\n\n".join([
-            _REVIEW.format(n=len(self.pending), run_id=self.run_id or "(unknown)"), SCHEMA,
+            _REVIEW.format(n=len(self.pending), run_id=self.run_id or "(unknown)",
+                           run_ids=", ".join(known[-40:]) or "(none)"), SCHEMA,
             f"## Current index\n{(self.dir / 'index.md').read_text()}",
             f"## Existing pages\n{existing}",
             f"## Current best: {best.id} train {best.score('train'):.4f}",
@@ -199,9 +212,27 @@ class MemoryWiki:
                     and rel.suffix == ".md" and ".." not in rel.parts:
                 (self.dir / rel).unlink(missing_ok=True)
                 written.append(f"deleted:{rel}")
+        restored = self._index_guard()
         self.llm.ledger.append({"type": "memory_review",
-                                "n_candidates": len(self.pending), "files": written})
+                                "n_candidates": len(self.pending), "files": written,
+                                **({"index_restored": restored} if restored else {})})
         self.pending = []
+
+    def _index_guard(self) -> list[str]:
+        """Re-append index lines for on-disk pages a review silently dropped
+        (s37 review 1 lost 10 pages; §6.1). The reviewer can merge them properly
+        next round — losing the pointer is the only unrecoverable failure."""
+        idx_path = self.dir / "index.md"
+        idx = idx_path.read_text()
+        # match by filename: the schema lists pages as "- file.md — ..." under
+        # section headings, so requiring the full section/ prefix false-positives
+        missing = [str(p.relative_to(self.dir)) for p in self._pages()
+                   if p.name not in idx]
+        if missing:
+            idx_path.write_text(idx.rstrip() + "\n" + "\n".join(
+                f"- {m} — (restored by index guard: dropped in last review)"
+                for m in missing) + "\n")
+        return missing
 
     def tools(self) -> list[dict]:
         return [
