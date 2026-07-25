@@ -211,8 +211,13 @@ try:
     _fm = _FM()
     _boundary = solve(_fm, np.random.default_rng(CFG["seed"]))
     # authoritative (uncounted) re-score of the returned artifact via the pool
-    # (same hang protection); candidates cannot forge this number
-    _ok, _err = _pool_eval([_boundary])[0]
+    # (same hang protection); candidates cannot forge this number. Retried: a
+    # transient hard-timeout under host CPU contention must not -inf a full run
+    # whose returned boundary is fine (cost run s103-92006336, 2026-07-25)
+    for _retry in range(3):
+        _ok, _err = _pool_eval([_boundary])[0]
+        if _ok is not None:
+            break
     if _ok is None:
         raise RuntimeError("final re-score of returned boundary failed: %s" % _err)
     _md, _bd = _ok
