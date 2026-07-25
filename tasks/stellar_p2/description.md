@@ -73,3 +73,21 @@ timing out (240 s CPU) or crashing scores -inf, so return your best-so-far
 early rather than gambling the deadline. Every good boundary you evaluate is
 also harvested into a persistent cross-run archive — finding several distinct
 good regions beats polishing one mediocre one.
+
+NOVELTY REQUIREMENT (2026-07-24): a boundary within max-coefficient distance
+1e-3 of ANY same-nfp public seed-bank entry is a NEAR-COPY of another user's
+submission — the export guard refuses it, and the harness subtracts up to 0.05
+from feasible train/val scores inside that ball (metrics report bank_dist and
+novelty_penalty; the official private score is never shaped). The goal is a
+boundary that beats 0.6361 officially AND sits >= 1e-3 from every bank seed:
+micro-polishing a bank seed CANNOT produce a submittable result. Promising
+paths: recombination / mode-grafting between different bank optima, coordinated
+multi-mode moves that leave the ball while holding feasibility, or an
+independent basin grown from NAE seeds. Measure your own distance in-run by
+comparing padded coefficient matrices against each fm.seed_bank(i).
+
+fm.bank_dist(boundary) (free, no eval budget) returns the exact max-coefficient
+distance to the nearest same-nfp bank seed — the same metric as the harness
+penalty and the export guard. fm.score() is BLIND to the novelty penalty: your
+acceptance key must combine them yourself, e.g.
+key = score - 0.05 * max(0.0, 1.0 - fm.bank_dist(b) / 1e-3).

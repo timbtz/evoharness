@@ -18,41 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tasks.stellar_p2.task import _ARCHIVE, verify_boundary  # noqa: E402
+from tasks.stellar_p2.task import (  # noqa: E402
+    _ARCHIVE, bank_distance as _nearest_bank_distance, verify_boundary)
 
 OUT = Path(__file__).parent / "submissions"
-
-
-def _nearest_bank_distance(boundary: dict) -> float | None:
-    """Max-coefficient distance to the closest public seed-bank boundary
-    (padded to a common canvas). None if no bank exists."""
-    import numpy as np
-    from tasks.stellar_p2.task import _BANK
-    if not _BANK:
-        return None
-
-    def mats(b):
-        return np.asarray(b["r_cos"], float), np.asarray(b["z_sin"], float)
-
-    def pad_to(a, shape):
-        out = np.zeros(shape)
-        r, c = a.shape
-        off = (shape[1] - c) // 2
-        out[:r, off:off + c] = a
-        return out
-
-    rc0, zs0 = mats(boundary)
-    best = None
-    for e in _BANK:
-        if e["boundary"].get("n_field_periods") != boundary.get("n_field_periods"):
-            continue
-        rc1, zs1 = mats(e["boundary"])
-        shape = (max(rc0.shape[0], rc1.shape[0]),
-                 max(rc0.shape[1], rc1.shape[1]))
-        d = max(np.abs(pad_to(rc0, shape) - pad_to(rc1, shape)).max(),
-                np.abs(pad_to(zs0, shape) - pad_to(zs1, shape)).max())
-        best = d if best is None else min(best, d)
-    return best
 
 
 def main() -> None:

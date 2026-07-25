@@ -45,3 +45,62 @@
 - Carried §6 bug fixes (2026-07-23): (1) memory.py index guard — after every review, on-disk pages missing from index.md are re-appended with a "(restored by index guard)" line and ledgered in memory_review.index_restored (s37 review silently dropped 10 pages). (2) already fixed in v2 — tool_call events carry name/args. (3) gate tie-band — an exact tie on the gated split now also requires train >= parent-train - train_noise (s37: val-ties admitted train -0.59 regressions). (4) missing `Idea:` line = contract violation "missing_idea": not evaluated (no simulator time wasted), one in-conversation repair round like compile errors. (5) reviewer prompt now carries a run-id whitelist (existing runs/ dirs, last 40) against fabricated citations. test_compile_repair_loop mock updated to emit Idea: lines (contract-conformant).
 - Fable refiner (user experiment, 2026-07-23 evening): new Config field `refiner` (claude model id, default None) — after each writer candidate is evaluated, axes/refiner.py ClaudeRefiner runs a HEADLESS `claude -p --disallowedTools "*" --strict-mcp-config` session (prompt-only, no tools/web) that sees: task description, the full memory wiki, the incumbent parent + score, the last-10 attempt digest, and the just-evaluated candidate (code, idea, scores, metrics, error). It outputs Idea/Prediction/code; the v2 is evaluated and gated EXACTLY like any candidate (id "cNNNNf", parent = the pool parent so gate comparisons stay honest even when the refined-from candidate was rejected; meta.refined_from records provenance). Ledgered as llm_call role "refiner" (usd null — Claude bills separately, z.ai guard untouched; bounded by generations). MemoryWiki gained note(cand, pool) with digest-dedupe so both the writer candidate and the v2 reach the reviewer (previously only `last` per gen was digested). Known accepted risk (user explicitly ok'd): Fable's weights may contain leaderboard knowledge for this public benchmark. Eval-budget deviation for the same campaign: STELLAR_TRAIN_OVERRIDES env var patches _TRAIN (first use: max_evals 160, cpu_budget 480s = ~2.2x depth per candidate; simulator time is the idle box's, LLM cost is per-generation, so deeper evals raise physics-per-dollar).
 - Seed bank from public submissions (user decision 2026-07-24, after the refiner campaign confirmed the QI wall is uncrossable at candidate eval scale — best shaped -0.42526, official 0.0): tasks/stellar_p2/seed_bank.json = 12 unique feasible P2 boundaries from the benchmark's public per-submission results dataset (cached rows2.json from the 2026-07-23 research session; full provenance per seed), exposed to candidates as fm.seed_bank(i)/fm.seed_bank_info() (unmetered). vlf validation: top-7 hold 0.60-0.62 at train fidelity (official 0.61-0.64, resolution gap 0.01-0.02); 3 seeds flip infeasible at vlf (tolerance camping at 0.007-0.011 — real examples of the paper's failure mode). High-mode bank boundaries cost 12-27s/eval → _SLACK 120→240 (first bank-seed eval hit the 600s host timeout). Seed optimizer v2: triage top-4 bank seeds, gentle polish (sigma 0.008, no inflation) on the best. THE BAR MOVES: novelty = beating the bank max 0.6361 official; returning/perturbing a bank boundary is worthless and submit_export now reports nearest-bank-seed distance and refuses near-copies (< 1e-3 max coefficient distance). Claim framing everywhere: "refined from public submissions", never "from scratch".
+
+## 2026-07-24 novelty shaping + DAG campaign
+Provenance audit showed every elite archive entry within 3.3e-4 of davidkh's
+public submission (export guard min distance 1e-3) — locally optimal
+micro-polish, but unsubmittable and not ours. Decision: bank_distance() in
+tasks/stellar_p2/task.py (the export guard's max-coeff padded metric) is now
+computed for every evaluated boundary; feasible train/val scores inside the
+1e-3 ball pay a linear penalty up to 0.05 (private/official never shaped;
+metrics carry bank_dist / novelty_penalty / submittable). Harness additions for
+the DAG branch-and-merge campaign (experiments/dag_campaign.py): Config
+stall_stop / review_every / analyst+analyst_every (axes/analyst.py, headless
+Fable in-run analysis every 10 cands -> new-ideas/analyst-*.md) / merge_from
+(Approach-B injection for branch merges) / resume_from "file:<path>"; refiner
+model per-run (campaign: claude-opus-4-8). Success bar: official > 0.6361 AND
+bank_dist >= 1e-3.
+
+## 2026-07-25 boundary-report leak fix + scale-normalized novelty + analyst injection
+CRITICAL bug found during the B4 review (candidate c0003: train metrics
+bit-identical to the seed while bank_dist read 7.04e-4): the train template's
+archive loop `for _s, _r, _f, _bd in sorted(_LOG...)` rebound `_bd`, so the
+"boundary" reported to the host was the collect_top-th (8th) best logged eval,
+NOT the returned one — since the stellar_p2 build, val/public/private scores,
+bank_dist/novelty_penalty/submittable, and best.py boundary identity mixed two
+different boundaries for every candidate. Fixed by renaming the loop variables;
+archive.jsonl rows were always self-consistent and stay trustworthy. All
+pre-fix boundary-level verdicts (bit-identical val ties, "escapes collapse at
+val", B2 c0006r1's infeasibility) are marked suspect in the wiki
+(implementation-insights/boundary-report-leak.md) pending re-adjudication from
+the archive. Second fix: bank_dist (container fm.bank_dist + host
+bank_distance + submit_export guard, now deduped to one implementation) is
+scale-normalized — each boundary divided by its own R0 before the max-coeff
+diff — because every official metric is dimensionless, so a uniform rescale is
+physics-null yet previously counted as novelty distance (verified: ×1.002 copy
+of bank #4 = raw 2e-3, normalized ~1e-17; the export guard was gameable by pure
+scaling). Escape distances measured pre-fix must be re-measured. Third (user
+request, compute headroom on GLM + Claude subscription): analyst upgrade —
+Config analyst_web (WebSearch/WebFetch in the in-run Fable session) and
+analyst_inject N (the analyst may WRITE up to N complete candidate modules to
+<run_dir>/INJECT/, consumed next generation, evaluated + gated like writer
+candidates, ids c<gen>i<k>, tools locked to Write(INJECT/**)); DAG campaign
+runs with analyst_web=true, analyst_inject=3, and STALL 25→40 (let branches
+develop further). B4's leak-tainted run stellar_p2-s103-71917443 stopped early
+and the branch restarted fresh under the fixed harness.
+
+**2026-07-25 (Claude-role redesign, user spec — everything on the newest Opus).**
+All three headless Claude roles now run claude-opus-4-8 (refiner already did;
+analyst and post-branch session switched from Fable). Refiner restructured from
+per-candidate to WINDOWED: every `refiner_every` (5) writer candidates one
+session sees the whole window — idea/prediction/reasoning/eval feedback/code per
+candidate — plus the wiki (Read/Glob/Grep, cwd = memory/<task>/, no web), and
+synthesizes exactly ONE best-of-window v2 (id c<gen>f, refined_from lists the
+window), evaluated + gated like any candidate. ~5x fewer refiner calls. Analyst
+restructured to a decision agent: every 12 candidates (10 GLM + ~2 refiner) it
+reviews the recent window AND the on-disk history (Read/Glob/Grep over
+runs/*/ledger.jsonl + the wiki), decides continue | revive | pivot, may use
+WebSearch/WebFetch (timeout raised to 1800s — novelty over speed), and injects
+exactly ONE candidate (analyst_inject 3→1) that the next writers optimize on
+top of; its wiki page gains mandatory "Decision" and "Decision log" sections so
+tries/decisions stay traceable. Config gains refiner_every (default 5).

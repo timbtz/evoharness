@@ -1,53 +1,68 @@
 # Memory index — stellar_p2 (ConStellaration P2, simple-to-build QI stellarator)
 
-NOTE TO REFINERS: plain reverts to the incumbent are near-wasted slots — when the writer's idea is broken, either REPAIR its mechanism so the idea actually runs, or propose YOUR OWN distinct improvement grounded in Open directions.
+Claim ladder: beat ALM baseline 0.431 -> beat ExLLM 0.505 -> approach leaderboard #1 0.6361.
+NOVELTY BAR: submittable = official > 0.6361 AND max-coeff distance >= 1e-3 from EVERY bank seed.
+`fm.score()` is BLIND to the novelty penalty. Acceptance keys MUST explicitly subtract it: `fm.bank_dist(b)` returns the exact guard metric.
+bank_dist is SCALE-NORMALIZED (2026-07-25): boundaries are divided by their own R0 before the diff — uniform rescaling is physics-null and earns ZERO distance.
+LEAK CAVEAT (2026-07-25): ALL pre-fix boundary-level verdicts (val ties, "escapes die at val", bank_dist values) are suspect — see implementation-insights/boundary-report-leak.md before trusting old evidence.
+OFFICIAL-FEASIBILITY RAZOR: the vlf->official feasibility gap is ~0.0065 on ESCAPED/truncated boundaries. Target vlf violation <= ~0.003 for escapes.
 
-Claim ladder (official high-fid scores; sources: arXiv 2506.19583, arXiv 2502.12845, HF leaderboard 2026-07-23): beat ALM baseline 0.431 (34h x 96 vCPU) -> beat ExLLM 0.505 -> approach leaderboard #1 0.6361 (davidkh).
-Truth = official evaluate() only; train/val shaped scores are proxies.
+## Current Best
+OFFICIAL best: c0005f of `stellar_p2-s17-78763752` — OFFICIAL 0.6335 for the exported boundary (a real boundary+score pair), but unsubmittable near-copy.
+CAVEAT: every other pre-2026-07-25 per-candidate val/private/bank_dist number below mixed boundary identities (boundary-report-leak.md). B4 s103 "c0003 val 0.6054" and B2 "c0006r1 val 0.6280 / officially infeasible" describe LEAKED boundaries, not those candidates' returns.
+SUBMITTABLE (official-verified 2026-07-25, runs/dag/escape_readjudication.json): B1 c0003f family — OFFICIAL 0.6330 (viol 0.0071) and 0.6321 (viol 0.00075) at norm dist 2.5e-3; B2 c0006r1 family — OFFICIAL 0.6263 at 1.24e-3. First genuinely novel results; bar 0.6361 not yet beaten (gap 0.0031). Counter-lesson: B3 c0002's escape held vlf viol 0.003 but blew up to 0.277 officially — target vlf viol <= 0.001 and LF-verify.
 
 ## successful-patterns
-- baseline-alm-tricks.md — the 0.431 recipe: spectrum scaling 1.5, ALM schedules, QI log-transform, NAE seeding
-- batch-population-and-coordinate-moves.md — structured budget spending + coordinate-deflation + surgical inflation tuning (c0009 -> c0028, c0025)
-- quadrupole-shear-and-dilation.md — zero-RNG deterministic geometric transforms to break mirror ratio and aspect ratio plateaus
-- margin-aware-polish.md — feasibility-margin-aware polish on bank seeds prevents val collapse (0.6286 val)
+- structural-ball-escape.md — truncation/pivot/dilation escapes; B4 keep=8 truncation yields feasible in-ball anchor (val 0.605)
+- multi-seed-triage.md — evaluating top-2 bank seeds in Phase 0
+- novelty-aware-micro-polish.md
+- margin-aware-polish.md
+- momentum-line-search.md
+- lf-eval-and-calibration.md
+- baseline-alm-tricks.md
+- pre-seed-bank/batch-population-and-coordinate-moves.md
+- pre-seed-bank/quadrupole-shear-and-dilation.md
 
 ## ineffective-approaches
-- inner-update-rule-evolution.md — don't reinvent CMA-es / ALM gradients
-- heuristic-constraint-biasing.md — hardcoded directional mutations or roulettes to fix constraints destroy physics geometry
-- schedule-rewrites.md — replacing the 4-phase schedule crashes the score
-- seed-and-schedule-tuning.md — widening elite pools, sigma tweaks break exploration
-- seed-portfolio-bloat.md — expanding seed budget or mixing ellipse geometries
-- coordinate-probes-and-sweep-rewrites.md — bidirectional/axis sweeps or magnitude-ranked sweeps destroy budget trajectory
-- alternating-sign-sweeps.md — alternating +/- signs per sweep wrap never fires
-- seed-portfolio-and-bias-rewrites.md — changing NAE portfolio parameters, swapping unmetered seeds, or injecting ALM heuristic penalties
-- worst-member-interpolation.md — blending worst elites with best destroys geometric stability
+- inner-update-rule-evolution.md — incl. NAE-as-winner refuted x3 in B3
+- heuristic-constraint-biasing.md
+- coordinate-and-phase-probes.md
+- blending-and-recombination.md — incl. B4 cross-basin `_recombine` tie
+- momentum-variants.md
+- major-radius-and-frobenius-escapes.md — incl. B4 negative R-shift wall-camper
+- macro-jump-and-passive-escapes.md — incl. B3 orth-shift wall-camper
+- structural-gravity-ascent.md
+- lexicographic-and-scalar-margins.md
+- dilation-ladders.md
+- mode-recovery-homotopy.md — REFUTED incl. negative contraction (B3 c0007/c0011/c0013)
+- canvas-cropping.md — REFUTED: cropping lowers eval resolution at every fidelity
+- pre-seed-bank/schedule-rewrites.md
+- pre-seed-bank/seed-portfolio-and-knob-tuning.md
+- pre-seed-bank/ngopt-endgame-slice.md
 
 ## implementation-insights
-- vlf-blindness-landmines.md — identical-to-parent train score after a change = UNTESTED, not safe (c0001 landmine)
-- refiner-guidance.md — refiners: repair or propose, never plain-revert
-- numpy-shape-bugs.md — variable-shape matrices kill vectorization; pad/project before arithmetic
-- risky-seed-modifications.md — unsafe unpacking of fm.eval and in-place array mutations trigger pydantic crashes
-- deterministic-plateau-and-decorations.md — exact score ties mean dead code paths or unfiring triggers
+- boundary-report-leak.md — READ FIRST: pre-2026-07-25 boundary verdicts suspect; scale-normalized bank_dist
+- vlf-blindness-landmines.md
+- lf-gate-selectors.md — gate fixes cannot conjure escape SUPPLY (B3 c0013f)
+- numpy-shape-bugs.md
+- risky-seed-modifications.md
+- decorations-and-invisible-polish.md — B4: wall-clock guards starving Phase 0 supply
+- qi-safe-units-bug.md
+- refiner-guidance.md — B3: 7/16 refinements were plateau-tying reverts
 
 ## performance-analysis
-- seed-bank-regime.md — THE CURRENT GAME: 12 public seeds, bar = 0.636, eval frugality, recombination directions
-- fidelity-dial.md — 1.4s vlf / 2.2s lf / ~64-128s official; disagreement = red flag
-- seed-baseline.md — raw NAE -0.95..-1.08, seed ends -0.665; QI is the wall
+- seed-bank-regime.md
+- fidelity-dial.md
+- pre-seed-bank/seed-baseline.md
 
 ## new-ideas
-- crash-classifier-guards.md — react to fm.last_error classes; pre-eval screens
-- dataset-seed-portfolios.md — HF-dataset seeds (harness policy decision)
-- vmec-hot-restart.md — 2-5x eval savings, blocked on fm API decision
-- candidate-fitted-surrogates.md — local surrogates; scores never leave the candidate
-- early-recombination.md — mean-crossover of pool[0]/[1] or bank seeds; refuted
-- free-seed-slot-extremes.md — replacing duplicate portfolio specs with mirror-crushing extremes
-- ngopt-endgame-slice.md — NGOpt on coarse modes at Phase 4; refuted at various budgets
+- b3-untested-proposals.md — margin-filtered interior escapes, QI-preserving re-triage, train-key misalignment constraint
+- b2-untested-proposals.md — B2→B3 status record: most items executed/refuted in B3
 
-## Current best
-c0001f of run stellar_p2-s17-78763752: train 0.6197 (val 0.6286). Polished the top bank seed with feasibility-margin-aware selection (penalty weight 8.0, SAFE limit 0.006) to avoid tolerance camping. Official private 0.0 — nothing feasible yet.
-
-## Open directions
-1. Tune `SAFE` (0.006), `SAFE_RET` (0.0075), and `QI_SAFE` (-4.05) dynamically in the margin-aware polish.
-2. Close ONE constraint fully without regressing the others, then QI last.
-3. Find new early-basin seed parameter extremes (like c0025/c0026f) without duplicating specs.
-4. Keep L high while repairing.
+## Open directions (REBUILT 2026-07-25 after the boundary-report leak fix — pre-fix val evidence is suspect)
+1. HARVEST THE MASKED ESCAPES: the archive holds out-of-ball boundaries the leak hid — B1 c0003f family (norm dist 2.5e-3, vlf viol down to 0.00075, shaped ~0.619), B3 c0002/c0008 (0.60-0.62), B2 c0006r1 family (dist 1.24e-3 normalized = structural). Official re-adjudication: runs/dag/escape_readjudication.json. Rebuild escape portfolios from THESE mechanisms and return the margin-best escape — returns are now scored correctly.
+2. ESCAPE SELECTION RULE (still sound): one eval_many portfolio (truncation / dilation ladder / pivots), select max shaped subject to vlf viol <= 0.003, log10_qi <= -4.005, bank_dist >= 1.03e-3; NO L-key in escape selection; polish L after margin. Bank-camper fallback.
+3. RE-LITIGATE "REFUTED AT VAL" CLAIMS: any pre-fix refutation whose evidence was a val collapse (escape families, homotopy, orth-shift wall-campers) evaluated the WRONG boundary and needs one honest retest before being trusted. Genuinely safe refutations: canvas cropping (resolution follows matrix shape), NAE-as-winner (train-side evidence), gate/acceptance decorations (bit-identical ties were partly leak artifacts, but decorations also never changed the return).
+4. BASIN DIVERSITY still untouched: multi-seed novelty-keyed portfolio, dual-basin polish, firewalled NAE/second-seed archive arms. Mystery: s17 c0001 archived shaped 0.6188 at norm dist 0.162 (!) viol 0.0098 — possibly a genuinely distinct basin, uninvestigated.
+5. BUDGET-WALL STARVATION: ensure Phase 0 escape portfolios and LF verification gates actually execute (`reserve()` must not exceed remaining wall-clock).
+- analyst-stellar_p2-s103-71917443-1.md — in-run Fable analysis @ 10 cands (leak-era run; boundary-level claims suspect)

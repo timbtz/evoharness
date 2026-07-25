@@ -1,10 +1,13 @@
-"""Fable refiner (user experiment 2026-07-23): after each writer candidate is
-evaluated, a Claude Fable 5 HEADLESS session (`claude -p`, no tools, prompt-only)
-sees that candidate + its eval feedback, the memory wiki, and the recent attempt
-history, and proposes a refined v2 that gets evaluated and gated like any other
-candidate (id suffix "f"). Fable calls are ledgered as role "refiner" but not
-charged to the z.ai budget guard (different bill); the generations cap bounds
-them. A refiner failure never kills the run."""
+"""Opus refiner (redesigned 2026-07-25, user spec): every `refiner_every` writer
+candidates (default 5) a HEADLESS Claude session (`claude -p`, read-only search
+tools, cwd = the task's memory wiki) sees that whole window — each candidate's
+idea, prediction, reasoning, eval feedback and code — and synthesizes ONE best
+version: refine the most promising candidate or combine the strongest mechanisms
+of several, aiming to one-shot a new top candidate with the wiki's evidence. No
+web access. The v2 is evaluated and gated like any other candidate (id suffix
+"f"). Calls are ledgered as role "refiner" but not charged to the z.ai budget
+guard (different bill); the window cadence bounds them. A refiner failure never
+kills the run."""
 from __future__ import annotations
 
 import subprocess
@@ -14,42 +17,39 @@ from pathlib import Path
 from core.candidate import Candidate
 from core.llm import parse_code, parse_idea, parse_prediction, parse_reasoning
 
-_PROMPT = """You are the REFINER in an evolutionary code-optimization loop. A \
-writer model just produced the candidate below; it has been evaluated. Your job: \
-propose a BETTER v2 of it — fix what is broken, keep what works, apply one or two \
-well-reasoned improvements grounded in the wiki evidence. Prior evidence says \
-minimal surgical changes to the incumbent outperform full restructures here.
+_PROMPT = """You are the REFINER in an evolutionary code-optimization loop. The \
+last {n} writer candidates are shown below in full: idea, prediction, reasoning, \
+evaluation feedback, code. They are your raw material. Your job: produce exactly \
+ONE candidate that is the best version of this window — refine the single most \
+promising candidate, or combine the strongest mechanisms of several — so it has a \
+real chance to one-shot a new top candidate. You are running inside the task's \
+memory wiki directory with Read/Glob/Grep: search it before committing to a \
+mechanism — build on what is proven, mine new-ideas/, and never re-apply what is \
+marked refuted/exhausted. Prior evidence says minimal surgical changes to a strong \
+incumbent outperform full restructures here.
 
 Output contract (exactly): one line `Idea: <one-sentence summary>`, one line \
-`Prediction: <expected effect and mechanism, falsifiable>`, brief reasoning, then \
-exactly ONE fenced code block with the COMPLETE improved module.
+`Prediction: <expected effect and mechanism, falsifiable>`, brief reasoning \
+(including WHICH window candidates you drew on and why), then exactly ONE fenced \
+code block with the COMPLETE improved module.
 
 # Task
 {description}
 
-# Memory wiki
-{wiki}
+# Wiki index (search pages with Grep/Read for details)
+{index}
 
-# Incumbent parent (score {parent_score})
+# Current best in pool ({best_id}, train {best_score})
 ```python
-{parent_code}
+{best_code}
 ```
 
-# Recent attempts (newest last)
-{recent}
-
-# The candidate to refine (id {cand_id}, {verdict})
-Writer's idea: {idea}
-Scores: {scores}
-Eval metrics: {metrics}
-Error: {error}
-```python
-{cand_code}
-```"""
+# The last {n} candidates (oldest first)
+{window}"""
 
 
 class ClaudeRefiner:
-    def __init__(self, model: str = "claude-fable-5", timeout: float = 900.0):
+    def __init__(self, model: str = "claude-opus-4-8", timeout: float = 1200.0):
         self.model, self.timeout = model, timeout
         self.run_dir: Path | None = None
         self.ledger = None
@@ -57,44 +57,41 @@ class ClaudeRefiner:
     def bind(self, run_dir: Path, ledger) -> None:
         self.run_dir, self.ledger = Path(run_dir), ledger
 
-    def _wiki(self, wiki_dir: Path) -> str:
-        d = Path(wiki_dir)
-        if not (d / "index.md").exists():
-            return "(no wiki)"
-        parts = [f"--- index.md ---\n{(d / 'index.md').read_text()[:4000]}"]
-        pages = sorted(p for p in d.glob("*/**/*.md")) + sorted(d.glob("*/*.md"))
-        for p in dict.fromkeys(pages):  # ordered dedupe
-            parts.append(f"--- {p.relative_to(d)} ---\n{p.read_text()[:3500]}")
-        return "\n\n".join(parts)[:60000]
-
-    def refine(self, task, pool, parent: Candidate, cand: Candidate,
-               gen: int, recent: list) -> Candidate | None:
-        mem_dir = Path(__file__).resolve().parent.parent / "memory" / task.name
-        recent_lines = "\n".join(
-            f"- {d['id']} [{'ERR' if d.get('error') else ('acc' if d.get('accepted') else 'rej')}]"
-            f" train {d.get('score')}: {(d.get('idea') or '')[:120]}"
-            for d in (recent or [])) or "(none)"
-        metrics = {k: v for k, v in (cand.meta.get("metrics") or {}).items()
+    @staticmethod
+    def _fmt(c: Candidate, pool) -> str:
+        metrics = {k: v for k, v in (c.meta.get("metrics") or {}).items()
                    if k != "boundary"}
+        scores = {s: round(v, 4) for s, v in c.scores.items()
+                  if v == v and v > float("-inf")}
+        return (
+            f"## {c.id} — {'ACCEPTED' if c.id in pool.by_id else 'rejected'}, "
+            f"scores {scores or '(none)'}\n"
+            f"Idea: {c.meta.get('idea') or '(none)'}\n"
+            f"Prediction: {c.meta.get('prediction') or '(none)'}\n"
+            f"Eval metrics: {str(metrics)[:1500]}\n"
+            f"Error: {(str(c.meta.get('error')) if c.meta.get('error') else '(none)')[:600]}\n"
+            f"Reasoning: {(c.meta.get('reasoning') or '(none)')[:1500]}\n"
+            f"```python\n{(c.code or '(no code)')[:9000]}\n```"
+        )
+
+    def refine(self, task, pool, window: list[Candidate], gen: int) -> Candidate | None:
+        mem_dir = Path(__file__).resolve().parent.parent / "memory" / task.name
+        best = pool.best("train")
+        index = (mem_dir / "index.md").read_text()[:5000] \
+            if (mem_dir / "index.md").exists() else "(no wiki)"
         prompt = _PROMPT.format(
-            description=task.description, wiki=self._wiki(mem_dir),
-            parent_score=round(parent.score("train"), 4),
-            parent_code=parent.code[:20000],
-            recent=recent_lines, cand_id=cand.id,
-            verdict="accepted" if cand.id in pool.by_id else "rejected",
-            idea=cand.meta.get("idea") or "(none)",
-            scores={s: round(v, 4) for s, v in cand.scores.items()
-                    if v == v and v > float("-inf")},
-            metrics=str(metrics)[:2000],
-            error=(cand.meta.get("error") or "(none)")[:600],
-            cand_code=(cand.code or "(no code)")[:20000])
+            n=len(window), description=task.description, index=index,
+            best_id=best.id, best_score=round(best.score("train"), 4),
+            best_code=best.code[:20000],
+            window="\n\n".join(self._fmt(c, pool) for c in window))
+        cwd = mem_dir if mem_dir.is_dir() else self.run_dir
         t0 = time.monotonic()
         try:
             r = subprocess.run(
                 ["claude", "-p", "--model", self.model, "--output-format", "text",
-                 "--strict-mcp-config", "--disallowedTools", "*"],
+                 "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep"],
                 input=prompt, capture_output=True, text=True,
-                timeout=self.timeout, cwd=str(self.run_dir))
+                timeout=self.timeout, cwd=str(cwd))
             text = r.stdout or ""
             if r.returncode != 0 and not text.strip():
                 raise RuntimeError(f"claude rc={r.returncode}: {r.stderr[-300:]}")
@@ -111,7 +108,8 @@ class ClaudeRefiner:
         if not code:
             return None
         return Candidate(
-            code=code, parent_id=parent.id, id=f"c{gen:04d}f",
-            meta={"gen": gen, "refiner": self.model, "refined_from": cand.id,
+            code=code, parent_id=best.id, id=f"c{gen:04d}f",
+            meta={"gen": gen, "refiner": self.model,
+                  "refined_from": [c.id for c in window],
                   "idea": parse_idea(text), "prediction": parse_prediction(text),
                   "reasoning": parse_reasoning(text)})

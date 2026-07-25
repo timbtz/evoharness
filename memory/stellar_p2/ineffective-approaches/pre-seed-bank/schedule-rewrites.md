@@ -1,4 +1,6 @@
 # Full schedule rewrites and unified adaptive loops
+> HISTORICAL — pre-seed-bank program (runs s7/s11: the retired 4-phase NAE optimizer). The lesson (surgical edits beat restructures) transfers; the specific schedule no longer exists.
+
 Rewriting the incumbent's phase schedule, phase boundaries, or early-loop decision trajectories consistently destroys search performance, dropping scores to the -0.62 to -0.84 range.
 
 ## How it was tried
@@ -11,7 +13,7 @@ Rewriting the incumbent's phase schedule, phase boundaries, or early-loop decisi
 - stellar_p2-s11-38566380 c0010 (-0.643): Multi-rank early descent burst (top-2 elites perturbed at sigma and 2.5*sigma simultaneously) replacing fixed-Phase-1.
 
 ## Why it failed
-The success of the incumbent relies on a tightly coupled, hardcoded trajectory of exploration (Phase 1) -> feature search (Phase 2) -> QI repair (Phase 3) -> exploit (Phase 4). Attempts to make this "smarter" or "continuous" consistently strip out the highly-tuned budget allocation that fits exactly into the tight evaluation budget. 
+The success of the incumbent relies on a tightly coupled, hardcoded trajectory of exploration (Phase 1) -> feature search (Phase 2) -> QI repair (Phase 3) -> exploit (Phase 4). Attempts to make this "smarter" or "continuous" consistently strip out the highly-tuned budget allocation that fits exactly into the tight evaluation budget.
 
 ## Verdict
-exhausted — stick to surgical 1-2 line edits to the existing phase schedule. Do not restructure the optimization loop.
+exhausted — stick to surgical 1-2 line edits to an incumbent's schedule. Do not restructure the optimization loop.

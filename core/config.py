@@ -35,9 +35,25 @@ class Config:
     )
     generations: int = 1000  # upper bound; budget stops the run first
     wiki_mode: str = "inject"  # S4=wiki_fs sub-mode: "inject" (top-k pages) | "tool" (read_wiki calls)
-    resume_from: str | None = None  # run_id: start from that run's best accepted candidate
-    refiner: str | None = None  # claude model id: each writer candidate gets a headless
-    # Claude v2 refinement pass (evaluated + gated like any candidate; id suffix "f")
+    resume_from: str | None = None  # run_id (or "file:<path>"): start from that run's
+    # best accepted candidate / that file's code
+    refiner: str | None = None  # claude model id: every refiner_every writer candidates
+    # a headless Claude session sees the whole window (ideas, feedback, code) + the wiki
+    # and synthesizes ONE v2 (evaluated + gated like any candidate; id suffix "f")
+    refiner_every: int = 5  # refiner cadence: one session per N writer candidates
+    stall_stop: int | None = None  # stop after N consecutive candidates without a new
+    # combined (train+val) best — the DAG campaign's branch-termination rule
+    review_every: int | None = None  # override MemoryWiki.REVIEW_EVERY for this run
+    analyst: str | None = None  # claude model id: independent in-run analysis session
+    # every analyst_every candidates; writes new-ideas/analyst-*.md to the wiki
+    analyst_every: int = 10
+    analyst_web: bool = False  # give the analyst WebSearch/WebFetch: it can pull
+    # approaches beyond the wiki (papers, write-ups) into its proposals
+    analyst_inject: int = 0  # >0: the analyst may WRITE up to N candidate modules
+    # to <run_dir>/INJECT/ per session; the loop evaluates + gates them like
+    # writer candidates at the next generation (ids c<gen>i<k>)
+    merge_from: str | None = None  # run_id (or "file:<path>"): that run's best program is
+    # shown every generation as "Approach B" with a merge directive (branch-merge runs)
 
     def __post_init__(self) -> None:
         if self.task not in TASKS:

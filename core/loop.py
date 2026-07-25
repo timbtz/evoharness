@@ -9,6 +9,7 @@ from __future__ import annotations
 import difflib
 import importlib
 import random
+import re
 import time
 from pathlib import Path
 
@@ -70,7 +71,15 @@ def _combined(scores: dict) -> float:
 def resume_code(run_id: str, task_name: str) -> str:
     """Best accepted candidate from a prior run's ledger (fallback: its best.py).
     "run_id:best30" resumes that run's saved 30s-budget champion file instead.
+    "file:<path>" (relative to repo root) resumes from a code file directly —
+    used by the DAG campaign for pinned seed variants.
     Raises ValueError so the API can reject bad requests before a run starts."""
+    if run_id.startswith("file:"):
+        p = Path(run_id[5:])
+        f = p if p.is_absolute() else _ROOT / p
+        if not f.is_file():
+            raise ValueError(f"resume_from: no such file {run_id[5:]!r}")
+        return f.read_text()
     run_id, _, artifact = run_id.partition(":")
     d = _ROOT / "runs" / Path(run_id).name
     if not (d / "ledger.jsonl").exists():
@@ -175,6 +184,27 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
         from axes.refiner import ClaudeRefiner
         refiner = ClaudeRefiner(model=cfg.refiner)
         refiner.bind(run_dir, ledger)
+    analyst = None
+    if cfg.analyst:
+        from axes.analyst import ClaudeAnalyst
+        analyst = ClaudeAnalyst(model=cfg.analyst, every=cfg.analyst_every,
+                                web=cfg.analyst_web, inject=cfg.analyst_inject)
+        analyst.bind(run_dir, ledger, task)
+    if cfg.review_every:
+        ax["feedback"].REVIEW_EVERY = cfg.review_every  # instance attr shadows class
+    merge_section = None
+    if cfg.merge_from:
+        merge_src = resume_code(cfg.merge_from, cfg.task)
+        merge_section = PromptSection(
+            "Second parent solution (Approach B) — MERGE OBJECTIVE",
+            "This run merges two independently evolved optimizer branches. Approach A is "
+            "the incumbent lineage shown above as parent. Below is the best program of the "
+            f"other branch ({cfg.merge_from}). Your goal: COMBINE the two — take the "
+            "strongest mechanisms of each (seed/basin choice, feasibility-margin "
+            "management, step/momentum logic, budget allocation) and integrate them into "
+            "one coherent better optimizer. Do not concatenate blindly; when mechanisms "
+            "conflict, keep the one with better evidence and say so in your reasoning.\n\n"
+            "```python\n" + merge_src[:15000] + "\n```")
     getattr(ax["feedback"], "bind", lambda *a: None)(run_dir, ledger)
     getattr(ax["knowledge"], "bind", lambda *a: None)(
         task, llm, ax["roles"], cfg.temperatures, ledger)
@@ -193,9 +223,61 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     ledger.append({"type": "candidate", "gen": 0, "accepted": True, **seed_cand.to_dict()})
 
     last, stop_reason, failures = seed_cand, "generations_exhausted", 0
+    best_comb, stall_n, n_cands = _combined(seed_cand.scores), 0, 0
+    refine_window: list[Candidate] = []
+
+    def admit(cand) -> bool:
+        """Evaluate + gate + ledger one non-writer candidate (analyst injection,
+        refiner v2), with the same stall accounting as the writer path."""
+        nonlocal last, n_cands, best_comb, stall_n
+        _evaluate_into(task, cand)
+        cand.cost = {"usd": round(guard.usd, 4), "calls": guard.calls}
+        acc = getattr(ax["search"], "adopt", lambda c: False)(cand) \
+            or ax["gate"].accept(cand, pool)
+        if acc:
+            _probe_extra_splits(task, cand)
+            ax["search"].insert(pool, cand)
+        ledger.append({"type": "candidate", "accepted": acc,
+                       "elapsed": round(guard.elapsed(), 1), **cand.to_dict()})
+        last = cand
+        n_cands += 1
+        comb = _combined(cand.scores)
+        if comb > best_comb:
+            best_comb, stall_n = comb, 0
+        else:
+            stall_n += 1
+        getattr(ax["knowledge"], "observe", lambda *a: None)(pool, cand, acc)
+        return acc
+
+    def consume_inject(gen: int) -> None:
+        """Analyst-written candidate modules (<run_dir>/INJECT/*.py): evaluated
+        and gated like writer candidates, then moved to INJECT/used/."""
+        inj = run_dir / "INJECT"
+        if not inj.is_dir():
+            return
+        for k, f in enumerate(sorted(inj.glob("*.py"))[:4]):
+            src = f.read_text()
+            (inj / "used").mkdir(exist_ok=True)
+            f.rename(inj / "used" / f.name)
+            head = {m.group(1).lower(): m.group(2).strip() for m in re.finditer(
+                r"^#\s*(Idea|Prediction):\s*(.+)$", src[:2000], re.M | re.I)}
+            admit(Candidate(
+                code=src, id=f"c{gen:04d}i{k}",
+                parent_id=pool.best("train").id if pool.all else None,
+                meta={"gen": gen, "injected": f.name,
+                      "idea": head.get("idea"), "prediction": head.get("prediction")}))
+
     for gen in range(1, cfg.generations + 1):
         if (run_dir / "STOP").exists():
             stop_reason = "user_stop"
+            break
+        try:
+            consume_inject(gen)
+        except Exception as e:  # a broken injected file must not kill the run
+            ledger.append({"type": "gen_error", "gen": gen,
+                           "error": f"inject: {str(e)[:280]}"})
+        if cfg.stall_stop and stall_n >= cfg.stall_stop:
+            stop_reason = f"stall: {stall_n} candidates without a new best"
             break
         try:
             guard.check()
@@ -206,6 +288,8 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
                 + ax["feedback"].build_context(pool, parents, last)
                 + getattr(ax["search"], "prompt_sections", lambda: [])()
             )
+            if merge_section is not None:
+                sections.append(merge_section)
             hint_file = run_dir / "HINT"  # live user steering: edit/delete anytime
             if hint_file.exists() and hint_file.read_text().strip():
                 sections.append(PromptSection(
@@ -303,27 +387,33 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
             "elapsed": round(guard.elapsed(), 1), **cand.to_dict(),
         })
         last = cand
+        n_cands += 1
+        comb = _combined(cand.scores)
+        if comb > best_comb:
+            best_comb, stall_n = comb, 0
+        else:
+            stall_n += 1
         getattr(ax["knowledge"], "observe", lambda *a: None)(pool, cand, accepted)
         if refiner is not None and cand.code:
-            # Fable v2 pass: digest the writer candidate now (v2 becomes `last`),
-            # then evaluate + gate the refinement like any other candidate
+            # windowed v2 pass: collect writer candidates; every refiner_every of
+            # them one Opus session digests the whole window (+ wiki search) and
+            # synthesizes ONE refinement, evaluated + gated like any candidate.
+            # note() digests each windowed candidate now, since a v2 displacing
+            # it as `last` would otherwise skip its feedback digest.
             getattr(ax["feedback"], "note", lambda *a: None)(cand, pool)
-            v2 = refiner.refine(task, pool, parents[0], cand, gen,
-                                getattr(ax["feedback"], "recent", []))
-            if v2 is not None:
-                _evaluate_into(task, v2)
-                v2.cost = {"usd": round(guard.usd, 4), "calls": guard.calls}
-                v2.meta["novelty"] = round(1 - difflib.SequenceMatcher(
-                    None, parents[0].code, v2.code).ratio(), 3)
-                accepted2 = getattr(ax["search"], "adopt", lambda c: False)(v2) \
-                    or ax["gate"].accept(v2, pool)
-                if accepted2:
-                    _probe_extra_splits(task, v2)
-                    ax["search"].insert(pool, v2)
-                ledger.append({"type": "candidate", "accepted": accepted2,
-                               "elapsed": round(guard.elapsed(), 1), **v2.to_dict()})
-                last = v2
-                getattr(ax["knowledge"], "observe", lambda *a: None)(pool, v2, accepted2)
+            refine_window.append(cand)
+            if len(refine_window) >= cfg.refiner_every:
+                window, refine_window = refine_window, []
+                v2 = refiner.refine(task, pool, window, gen)
+                if v2 is not None:
+                    v2.meta["novelty"] = round(1 - difflib.SequenceMatcher(
+                        None, pool.best("train").code, v2.code).ratio(), 3)
+                    admit(v2)
+        if analyst is not None:
+            analyst.maybe(pool, n_cands, getattr(ax["feedback"], "recent", []))
+        if cfg.stall_stop and stall_n >= cfg.stall_stop:
+            stop_reason = f"stall: {stall_n} candidates without a new best"
+            break
         if gen % PUBLIC_EVERY == 0:
             _report_public(task, ledger, pool.best("train"), gen, guard)
 

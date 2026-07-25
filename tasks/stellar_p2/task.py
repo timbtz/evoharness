@@ -177,6 +177,34 @@ class _FM:
                 for i, e in enumerate(CFG["seed_bank"])]
     def seed_bank(self, i):
         return json.loads(json.dumps(CFG["seed_bank"][int(i)]["boundary"]))
+    def bank_dist(self, boundary):
+        """Max-coefficient distance to the closest same-nfp bank seed (padded
+        canvas) — the export guard's + harness novelty penalty's exact metric.
+        None if no same-nfp seed exists. Free (no eval budget)."""
+        def pad(a, shape):
+            out = np.zeros(shape); r, c = a.shape; off = (shape[1] - c) // 2
+            out[:r, off:off + c] = a
+            return out
+        def norm(b):
+            # scale-normalize by the boundary's own R0: official metrics are all
+            # dimensionless, so a uniform rescale is physics-null and must not
+            # count as novelty distance (2026-07-25)
+            rc = np.asarray(b["r_cos"], float); zs = np.asarray(b["z_sin"], float)
+            s = rc[0, rc.shape[1] // 2]
+            s = s if s > 0.1 else 1.0
+            return rc / s, zs / s
+        rc0, zs0 = norm(boundary)
+        best = None
+        for e in CFG.get("seed_bank", []):
+            bb = e["boundary"]
+            if bb.get("n_field_periods") != boundary.get("n_field_periods"):
+                continue
+            rc1, zs1 = norm(bb)
+            shape = (max(rc0.shape[0], rc1.shape[0]), max(rc0.shape[1], rc1.shape[1]))
+            d = max(np.abs(pad(rc0, shape) - pad(rc1, shape)).max(),
+                    np.abs(pad(zs0, shape) - pad(zs1, shape)).max())
+            best = d if best is None else min(best, d)
+        return best
 
 try:
     exec(compile(__CODE__, "<candidate>", "exec"), globals())
@@ -190,11 +218,14 @@ try:
     _md, _bd = _ok
     _feas, _real, _shaped = _md["feasibility"], _md["p2_score"], _md["shaped_score"]
     _seen, _arch = set(), []
-    for _s, _r, _f, _bd in sorted(_LOG, key=lambda t: -t[0]):
-        _k = json.dumps(_bd, sort_keys=True)
+    # loop vars deliberately distinct from _bd: until 2026-07-25 this loop rebound
+    # _bd, so the reported "boundary" was the collect_top-th logged eval instead of
+    # the returned one — poisoning val/private/best.py for every candidate
+    for _as, _ar, _af, _ab in sorted(_LOG, key=lambda t: -t[0]):
+        _k = json.dumps(_ab, sort_keys=True)
         if _k not in _seen:
             _seen.add(_k)
-            _arch.append({"shaped": _s, "p2": _r, "feasibility": _f, "boundary": _bd})
+            _arch.append({"shaped": _as, "p2": _ar, "feasibility": _af, "boundary": _ab})
         if len(_arch) >= CFG["collect_top"]:
             break
     print(json.dumps({"score": _shaped, "metrics": {
@@ -247,6 +278,63 @@ def _bkey(boundary: dict) -> str:
     zs = np.round(np.asarray(boundary["z_sin"], float), 4)
     h = hashlib.sha1(rc.tobytes() + zs.tobytes()).hexdigest()[:16]
     return f'{boundary.get("n_field_periods", 1)}-{h}'
+
+
+_NOVELTY_MIN, _NOVELTY_PEN = 1e-3, 0.05  # export guard refuses < 1e-3 (submit_export)
+
+
+def _scale_norm(boundary: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Coefficient matrices divided by the boundary's own R0 (r_cos[0, n=0]).
+    The official metrics are all dimensionless, so a uniform rescale is
+    physics-null — without this normalization it would manufacture novelty
+    distance for a boundary that is physically a copy (2026-07-25)."""
+    rc = np.asarray(boundary["r_cos"], float)
+    zs = np.asarray(boundary["z_sin"], float)
+    s = rc[0, rc.shape[1] // 2]
+    s = s if s > 0.1 else 1.0
+    return rc / s, zs / s
+
+
+def bank_distance(boundary: dict) -> float | None:
+    """Max-coefficient distance to the closest same-nfp public seed-bank
+    boundary, scale-normalized and padded to a common canvas — the export
+    guard's exact metric."""
+    if not _BANK:
+        return None
+
+    def pad_to(a, shape):
+        out = np.zeros(shape)
+        r, c = a.shape
+        off = (shape[1] - c) // 2
+        out[:r, off:off + c] = a
+        return out
+
+    rc0, zs0 = _scale_norm(boundary)
+    best = None
+    for e in _BANK:
+        bb = e["boundary"]
+        if bb.get("n_field_periods") != boundary.get("n_field_periods"):
+            continue
+        rc1, zs1 = _scale_norm(bb)
+        shape = (max(rc0.shape[0], rc1.shape[0]), max(rc0.shape[1], rc1.shape[1]))
+        d = max(np.abs(pad_to(rc0, shape) - pad_to(rc1, shape)).max(),
+                np.abs(pad_to(zs0, shape) - pad_to(zs1, shape)).max())
+        best = d if best is None else min(best, d)
+    return best
+
+
+def _novelty_shape(res: EvalResult, d: float | None) -> EvalResult:
+    """Train/val fitness shaping (novelty decision 2026-07-24): a FEASIBLE
+    boundary inside the export guard's 1e-3 ball is a near-copy of a public
+    submission — unsubmittable — so its harness fitness pays up to _NOVELTY_PEN,
+    linearly decaying to 0 at the ball's edge (gradient points OUT of the ball).
+    The official private score is never shaped: it stays the truth."""
+    if d is None or res.error or res.score <= 0 or d >= _NOVELTY_MIN:
+        return res
+    pen = round(_NOVELTY_PEN * (1.0 - d / _NOVELTY_MIN), 4)
+    res.metrics["novelty_penalty"] = pen
+    return EvalResult(res.score - pen, metrics=res.metrics,
+                      error=res.error, seconds=res.seconds)
 
 
 def _runner(script: str, timeout: float = 30.0, mem_mb: int = _MEM_MB,
@@ -367,13 +455,22 @@ class _StellarP2Task:
         boundary = self._bcache[sha]
         res = verify_boundary(boundary, official=(split == "private"),
                               fidelity=_FIDELITY.get(split, "low_fidelity"))
+        d = bank_distance(boundary)
+        if not res.error and d is not None:
+            res.metrics["bank_dist"] = round(d, 6)
         if not res.error and split in ("val", "private"):
             kind = "official" if split == "private" else _FIDELITY[split]
             self._archive([{"shaped": res.metrics.get("shaped_score", res.score),
                             "p2": res.metrics.get("p2_score"),
                             "feasibility": res.metrics.get("feasibility"),
+                            **({"bank_dist": round(d, 6)} if d is not None else {}),
                             "boundary": boundary}], sha, kind)
-        return res
+        if split == "private":
+            if not res.error:
+                res.metrics["submittable"] = bool(
+                    res.score > 0 and (d is None or d >= _NOVELTY_MIN))
+            return res  # official truth, never shaped
+        return _novelty_shape(res, d)
 
     def _train(self, code: str) -> EvalResult:
         cfg = {**_TRAIN, "fidelity": _FIDELITY["train"],
@@ -399,13 +496,17 @@ class _StellarP2Task:
                               seconds=res.seconds)
         sha = _sha(code)
         self._bcache[sha] = boundary
+        d = bank_distance(boundary)
+        if d is not None:
+            m["bank_dist"] = round(d, 6)
         try:
             self._archive(arch + [{"shaped": res.score, "p2": m.get("p2_score"),
                                    "feasibility": m.get("feasibility"),
+                                   **({"bank_dist": round(d, 6)} if d is not None else {}),
                                    "boundary": boundary}], sha, _FIDELITY["train"])
         except Exception as e:  # archive is bookkeeping: never fail an eval on it
             m["archive_error"] = str(e)[:200]
-        return res
+        return _novelty_shape(res, d)
 
     # -- frontend -------------------------------------------------------
     def render(self, code: str, result: EvalResult) -> dict:

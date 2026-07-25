@@ -43,6 +43,8 @@ def start_run(body: dict):
         cfg = Config.from_dict(body)
         if cfg.resume_from:
             resume_code(cfg.resume_from, cfg.task)  # fail fast: 422, not a dead run dir
+        if cfg.merge_from:
+            resume_code(cfg.merge_from, cfg.task)
     except (TypeError, ValueError) as e:
         raise HTTPException(422, str(e))
     run_id = f"{cfg.task}-s{cfg.seed}-{int(time.time() * 1000) % 10**8}"
