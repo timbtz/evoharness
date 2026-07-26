@@ -40,11 +40,18 @@ REFINER_EVERY = 5                 # (user 2026-07-25: everything on the newest O
 ANALYST = "claude-opus-4-8"       # in-run analysis + single-candidate injection
 ANALYST_EVERY = 12                # ~10 GLM + 2 refiner candidates per analyst window
 POST_BRANCH_MODEL = "claude-opus-4-8"  # wiki cleanup + branch post-mortem session
-STALL = 40                        # branch-termination rule (25→40 2026-07-25:
-# user — compute headroom, let the seeds develop further before terminating)
-RUN_USD, RUN_CALLS, RUN_SECONDS = 4.0, 200, 43200
-BRANCH_USD = 8.0                  # per-branch z.ai cap across continuation runs
-GLOBAL_USD = 55.0                 # whole-campaign z.ai cap (user 2026-07-24:
+STALL = 60                        # branch-termination rule (25→40→60 2026-07-25:
+# user — let each branch make many iterations, at least 50 candidates, before
+# a no-progress stall can terminate it; caps below raised to match so nothing
+# cuts a branch short of that)
+RUN_USD, RUN_CALLS, RUN_SECONDS = 20.0, 800, 64800  # 18h: MUST stay below the
+# driver's RUN_TIMEOUT_S (20h) net so a healthy long run ends on its own budget
+# ("budget: max_seconds" => branch CONTINUES from its best) instead of tripping
+# the STOP net ("user_stop" => whole campaign HALTS). The 20h net now only
+# catches genuinely hung runs. (2026-07-26: raising RUN_SECONDS above the net
+# guillotined s103-473410 at 129 cands / private 0.6352 and paused the campaign.)
+BRANCH_USD = 30.0                 # per-branch z.ai cap across continuation runs
+GLOBAL_USD = 120.0               # whole-campaign z.ai cap (user 2026-07-24:
 # novelty > speed — "allow yourself your needed time")
 GENERATIONS = 200
 POLL_S, RUN_TIMEOUT_S = 45, 20 * 3600
