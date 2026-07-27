@@ -179,17 +179,21 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     llm = llm_factory(ledger, guard)
     rng = random.Random(cfg.seed)
     ax = assemble(cfg, task, llm)
+    # refiner/analyst run on the same z.ai client as the writers (2026-07-27:
+    # ported off headless Claude), so their calls are metered and charged to the
+    # run's budget guard like any other call.
+    wiki = ax["feedback"] if hasattr(ax["feedback"], "call_tool") else None
     refiner = None
     if cfg.refiner:
-        from axes.refiner import ClaudeRefiner
-        refiner = ClaudeRefiner(model=cfg.refiner)
-        refiner.bind(run_dir, ledger)
+        from axes.refiner import Refiner
+        refiner = Refiner(model=cfg.refiner)
+        refiner.bind(run_dir, ledger, llm, wiki)
     analyst = None
     if cfg.analyst:
-        from axes.analyst import ClaudeAnalyst
-        analyst = ClaudeAnalyst(model=cfg.analyst, every=cfg.analyst_every,
-                                web=cfg.analyst_web, inject=cfg.analyst_inject)
-        analyst.bind(run_dir, ledger, task)
+        from axes.analyst import Analyst
+        analyst = Analyst(model=cfg.analyst, every=cfg.analyst_every,
+                          web=cfg.analyst_web, inject=cfg.analyst_inject)
+        analyst.bind(run_dir, ledger, task, llm, wiki)
     if cfg.review_every:
         ax["feedback"].REVIEW_EVERY = cfg.review_every  # instance attr shadows class
     merge_section = None

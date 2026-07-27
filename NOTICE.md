@@ -56,3 +56,17 @@ No GPL/AGPL code was used.
   leaderboard submissions", never "from scratch", and any actual leaderboard
   submission from such a lineage must disclose this. submit_export.py records
   the distance to the nearest bank seed and refuses near-copies.
+
+  **Status of our best result (2026-07-27, audited).** `experiments/submissions/
+  p2-3-dac057eed0c1b2a8-0.6400.json` scores official P2 0.6400 vs the public
+  leaderboard best 0.6361, but it is a REFINEMENT OF THAT LEADERBOARD ENTRY, not
+  an independent discovery: its Fourier boundary differs from bank seed #0
+  (submitter `davidkh`, official 0.6361) by ‖Δ‖/‖seed‖ = 0.47 %, cosine similarity
+  0.999989, max single-coefficient distance 2.6e-3 of R0. It also spends 93 % of
+  the benchmark's 1 % feasibility tolerance (aspect ratio 10.093) where davidkh
+  spends 7.5 %; normalized to equal tolerance use it scores ≈0.632, i.e. BELOW his
+  entry. Runs predating the seed bank never produced a feasible boundary at all
+  (official 0.0, violations 42-52× the tolerance). Evidence and derivations:
+  `memory/stellar_p2/performance-analysis/{provenance-and-independence,
+  feasibility-tolerance-economics}.md`. Any publication, submission or talk about
+  this result must carry both qualifications.

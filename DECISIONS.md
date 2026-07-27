@@ -104,3 +104,52 @@ WebSearch/WebFetch (timeout raised to 1800s — novelty over speed), and injects
 exactly ONE candidate (analyst_inject 3→1) that the next writers optimize on
 top of; its wiki page gains mandatory "Decision" and "Decision log" sections so
 tries/decisions stay traceable. Config gains refiner_every (default 5).
+
+**2026-07-27 (all roles → z.ai, user directive: "we now only use z.ai models with
+the z.ai API key"; no Claude-billed work).** The three headless `claude -p`
+sessions are gone. Refiner (`axes/refiner.py`, class `Refiner`, alias
+`ClaudeRefiner` kept for saved configs) and analyst (`axes/analyst.py`, class
+`Analyst`) now call the existing z.ai client via `LLM.chat`, with the wiki's own
+`read_memory`/`grep_memory` tools standing in for the old Read/Glob/Grep session
+and `axes/research.py`'s `web_search`/`fetch_url` standing in for WebSearch/
+WebFetch when `analyst_web` is set. Consequence to remember: refiner/analyst calls
+were previously off the z.ai bill and uncharged; they are now metered through the
+run's BudgetGuard, so BRANCH_USD/GLOBAL_USD cover the whole campaign and a branch
+will reach its cap sooner than the old numbers imply. Analyst injection is now
+parsed HOST-SIDE out of the reply's fenced code blocks instead of written by a
+model file-write tool — in branch B4 every model-side INJECT write was
+permission-blocked, so 8 analyst sessions produced 0 candidates. The post-branch
+session (`experiments/dag_campaign.py`) became a single z.ai call over a
+host-extracted candidate history + the wiki, writing only `runs/dag/proposals/
+<branch>.md`; it no longer edits the wiki. That capability is deliberately dropped,
+not ported: it repeatedly deleted pages without merging them (s37 index drop, s17
+margin-aware-polish deletion, B2/B3 tombstones). Wiki upkeep is now the in-run
+reviewer's job plus manual passes.
+
+**2026-07-27 (result audit — what the 0.6400 is and is not).** Best candidate
+`stellar_p2-s105-26196944` c0045 re-verified independently from the archive in a
+clean container: official P2 **0.6400**, feasibility 0.00931 — exported to
+`experiments/submissions/p2-3-dac057eed0c1b2a8-0.6400.json`. Runner-up c0088r1
+re-verified at 0.6398/0.00959. Both clear the 1e-3 export guard (2.6e-3). Two
+qualifications are now recorded in NOTICE.md, the wiki index and two new
+performance-analysis pages, and must accompany any claim about this result:
+(1) TOLERANCE. `constellaration==0.2.6` accepts any design whose worst normalized
+constraint violation is ≤ `_DEFAULT_RELATIVE_TOLERANCE = 0.01`; score (L/20) is
+independent of how much of that is spent. Aspect ratio is always our binding
+constraint. We sit at 93 % of tolerance (A = 10.093); leaderboard #1 davidkh sits
+at 7.5 % (A = 10.0075). Measured exchange rate ≈ 0.92 score per unit feasibility
+(paired official evals 0.92; 307-boundary archive regression 0.91; low-margin
+evidence s17 c0005f 0.6335 @ 0.00144). Normalized to his margin we score ≈0.632 —
+BELOW him. The margin is exact and reproducible (feasibility is pure geometry,
+fidelity-invariant to 1e-15), so there is no numerical risk, only version-drift
+risk: a >0.7 %-of-bound change in the aspect-ratio definition or tolerance flips us
+to 0.0, as it did for B2 c0006r1 at 0.0106.
+(2) PROVENANCE. The winner is bank seed #0 (davidkh's published entry) perturbed by
+‖Δ‖/‖seed‖ = 0.47 %, cosine 0.999989 — nearer to him than to the lhhhhappy seed the
+wiki credited. Runs predating the seed bank (s42, s7, s11) never produced a
+feasible boundary at all: official 0.0, violations 42-52× tolerance.
+B6-nae-independent, the only branch that would test unaided discovery, has never
+run. Actions taken: `submit_export.py` now records nearest-seed identity, cosine,
+relative norm, tolerance-used fraction and an equal-margin score estimate in every
+submission's provenance block, and the wiki tracks a second board — best official
+score at feasibility ≤ 0.002 — on which we hold 0.6335 and have not beaten 0.6361.

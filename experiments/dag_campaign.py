@@ -19,7 +19,6 @@ State: runs/dag/state.json (resumable — re-running continues where it left off
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 import urllib.error
@@ -35,11 +34,15 @@ STATE = DAG / "state.json"
 
 SWITCHES = {"feedback": "memory", "gate": "holdout", "search": "staged",
             "knowledge": "off", "roles": "single_strong"}
-REFINER = "claude-opus-4-8"       # windowed v2 pass every REFINER_EVERY writer cands
-REFINER_EVERY = 5                 # (user 2026-07-25: everything on the newest Opus)
-ANALYST = "claude-opus-4-8"       # in-run analysis + single-candidate injection
-ANALYST_EVERY = 12                # ~10 GLM + 2 refiner candidates per analyst window
-POST_BRANCH_MODEL = "claude-opus-4-8"  # wiki cleanup + branch post-mortem session
+# 2026-07-27 (user directive): every role runs on z.ai with the z.ai key — no
+# Claude-billed sessions anywhere in the campaign. Refiner/analyst/post-branch
+# calls are now on the same bill as the writers, so BRANCH_USD/GLOBAL_USD below
+# cover the WHOLE campaign rather than just the writer half of it.
+REFINER = "glm-5.2"               # windowed v2 pass every REFINER_EVERY writer cands
+REFINER_EVERY = 5
+ANALYST = "glm-5.2"               # in-run analysis + single-candidate injection
+ANALYST_EVERY = 12                # ~10 writer + 2 refiner candidates per analyst window
+POST_BRANCH_MODEL = "glm-5.2"     # branch post-mortem + HINT for the next branch
 STALL = 60                        # branch-termination rule (25→40→60 2026-07-25:
 # user — let each branch make many iterations, at least 50 candidates, before
 # a no-progress stall can terminate it; caps below raised to match so nothing
@@ -82,24 +85,32 @@ LEAVES = [
 _PIN_ANCHOR = '        info = sorted(fm.seed_bank_info(), key=lambda e: -e["official_score"])'
 
 POST_BRANCH_PROMPT = """You are the post-branch analysis session of a DAG evolution \
-campaign on ConStellaration P2 (repo: {root}). Branch {name} just terminated \
-({desc}). Its runs (ledger.jsonl in each): {run_dirs}. Wiki: memory/stellar_p2/.
+campaign on ConStellaration P2. Branch {name} just terminated ({desc}).
 
-Do, in order:
-1. ANALYSE the branch: read the ledgers (python3 one-liners are not available — use \
-Read/Grep on the .jsonl files; candidate events carry meta.idea/scores). What was \
-tried, what won, what was wasted, how the Opus refiner and Opus analyst performed.
-2. CLEAN the wiki per memory/stellar_p2/SCHEMA.md: merge duplicate pages, keep the \
-pre-seed-bank/ subfolder structure, fix stale index lines and the Current best, \
-absorb analyst-*.md pages worth keeping into proper pages and delete absorbed ones. \
-Conservative: never lose an approach silently.
-3. WRITE {proposal} with exactly these sections:
+The branch's candidate history is summarised below (host-extracted from the run \
+ledgers) together with the memory wiki. Write ONLY a markdown page with exactly \
+these sections:
 # Branch {name} post-mortem
 ## Analysis
-## Wiki changes made
 ## HINT
-The HINT section (max 1200 chars) = concrete directives for the NEXT branch's \
-writers: what to exploit, what to avoid, informed by everything above."""
+
+Analysis: what was tried, what won, what was wasted, how the refiner and analyst \
+performed. Ground every claim in the candidate rows below — no generic advice.
+HINT (max 1200 chars): concrete directives for the NEXT branch's writers — what to \
+exploit, what to avoid.
+
+NOTE: this session cannot edit files, so do NOT propose wiki edits as if you were \
+making them; anything the wiki must record, say plainly in Analysis so a human or \
+the in-run reviewer can fold it in.
+
+# Branch runs
+{run_dirs}
+
+# Candidate history
+{history}
+
+# Memory wiki
+{wiki}"""
 
 
 def log(*a):
@@ -271,21 +282,66 @@ def run_branch(st, branch):
         # budget/generations/llm_error: continue the branch from this run
 
 
+def _branch_history(branch) -> str:
+    """One line per candidate across the branch's runs — the post-mortem's evidence."""
+    lines = []
+    for r in branch["runs"]:
+        p = ROOT / "runs" / r["run_id"] / "ledger.jsonl"
+        if not p.exists():
+            continue
+        lines.append(f"--- {r['run_id']} ---")
+        for raw in p.read_text().splitlines():
+            try:
+                e = json.loads(raw)
+            except ValueError:
+                continue
+            if e.get("type") != "candidate":
+                continue
+            m, s = e.get("meta") or {}, e.get("scores") or {}
+            role = "refiner" if m.get("refiner") else ("analyst" if "i" in
+                                                       str(e.get("id"))[5:] else "writer")
+            met = {k: v for k, v in (m.get("metrics") or {}).items()
+                   if k in ("p2_score", "feasibility", "bank_dist")}
+            lines.append(
+                f"{e.get('id')} [{role}] {'acc' if e.get('accepted') else 'rej'} "
+                f"train={s.get('train')} val={s.get('val')} {met} "
+                f"err={(str(m.get('error') or ''))[:60]} idea={(m.get('idea') or '')[:160]}")
+    return "\n".join(lines)[:60000] or "(no candidate events)"
+
+
+def _wiki_text() -> str:
+    mem = ROOT / "memory" / "stellar_p2"
+    idx = mem / "index.md"
+    if not idx.exists():
+        return "(no wiki)"
+    parts = [f"--- index.md ---\n{idx.read_text()[:5000]}"]
+    for p in sorted(mem.glob("*/**/*.md")) + sorted(mem.glob("*/*.md")):
+        parts.append(f"--- {p.relative_to(mem)} ---\n{p.read_text()[:2000]}")
+    return "\n\n".join(dict.fromkeys(parts))[:40000]
+
+
 def post_branch(st, branch):
+    """z.ai post-mortem (2026-07-27: was a headless Claude session with file-edit
+    tools). The model no longer edits the wiki — that capability cost more than it
+    returned (it repeatedly deleted pages without merging them) and Claude sessions
+    are off the table; it writes the analysis + HINT, the host writes the file."""
     PROPOSALS.mkdir(parents=True, exist_ok=True)
     proposal = PROPOSALS / f"{branch['name']}.md"
     run_dirs = ", ".join(f"runs/{r['run_id']}" for r in branch["runs"])
-    prompt = POST_BRANCH_PROMPT.format(root=ROOT, name=branch["name"],
-                                       desc=branch["desc"], run_dirs=run_dirs,
-                                       proposal=proposal.relative_to(ROOT))
-    log(f"{branch['name']}: post-branch Opus session starting")
+    prompt = POST_BRANCH_PROMPT.format(
+        name=branch["name"], desc=branch["desc"], run_dirs=run_dirs,
+        history=_branch_history(branch), wiki=_wiki_text())
+    log(f"{branch['name']}: post-branch z.ai session starting ({POST_BRANCH_MODEL})")
     try:
-        subprocess.run(
-            ["claude", "-p", "--model", POST_BRANCH_MODEL, "--output-format", "text",
-             "--strict-mcp-config",
-             "--allowedTools", "Read,Glob,Grep,Write,Edit"],
-            input=prompt, capture_output=True, text=True,
-            timeout=1800, cwd=str(ROOT))
+        sys.path.insert(0, str(ROOT))
+        from core.ledger import BudgetGuard, Ledger
+        from core.llm import LLM
+        llm = LLM(Ledger(DAG), BudgetGuard(max_usd=2.0, max_calls=10,
+                                           max_seconds=1800))
+        text = llm.chat(POST_BRANCH_MODEL, [{"role": "user", "content": prompt}],
+                        0.4, role="post_branch", max_tokens=8192)
+        if text.strip():
+            proposal.write_text(text.strip() + "\n")
     except Exception as e:
         log(f"{branch['name']}: post-branch session failed: {e}")
     if proposal.exists():

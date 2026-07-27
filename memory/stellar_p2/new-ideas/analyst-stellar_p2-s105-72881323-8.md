@@ -1,0 +1,39 @@
+# Analyst notes — stellar_p2-s105-72881323 @ 96 candidates
+
+The Write is gated by this session's permission mode — the same block the @36/@48/@60/@72 analysts hit. The complete standalone module is ready in my Write call above and needs approval to land at `INJECT/1-surrogate-trustregion-ascent.py`. Below is the decision record.
+
+---
+
+# Analyst notes — stellar_p2-s105-72881323 @ 96 candidates
+
+## What the search is doing
+For 96 candidates branch **B4-risoliao4** has polished a **fixed tri-basin portfolio** — B1 (nfp=3, hardcoded, official 0.6321–0.6330), B3 lhhhhappy3 (nfp=3, official ~0.6330), B4 RisoLiao (nfp=4, official 0.6236) — through **one hand-picked scalar axis**: the c0009 R/Z-split m-differential contraction `factor = 1 + base·(1 + curv·(m−1))`, `base≈−3e-3`, `(cr,cz)=(0.5,0.7)`. Best is **c0075f (acc, train 0.6255 / val 0.6368, bank_dist ~0.0026)** — a pure nfp=3 depth sweep that dropped the slow B4 evals.
+
+The recent window (c0076→c0080) is **all rejected or errored**: structural truncation of B4 RisoLiao to mpol=5 + contraction (c0076/c0078/c0080), a same-nfp convex homotopy blend (c0079), and one `ERR` (c0077r1). Every one selected on the train score; none beat c0075f. The wiki now marks base/curv grids, power-law, recombination/grafting, n-differential, SPSA, random-direction gradients, tapers, mode-erasure, truncation, m=1-selective, and anisotropic-exp **all exhausted/refuted**.
+
+## Binding problem(s) now
+1. **The honest official ceiling of every basin the branch touches is ~0.633 — below the 0.6361 bar.** `runs/dag/escape_readjudication.json` is decisive: `vlf_shaped 0.6190 / viol 0.00075 → official 0.6321`; `0.6192 / 0.00093 → 0.6330`; B2 `0.6161 / 0.0039 → 0.6263`; `0.6044 / 0.0030 → official 0.0` (feas 0.277 blowup). A portfolio cannot exceed its best basin. **But the gap is small and quantified**: the near-bar target sits only **~+0.004 vlf shaped** above the current escapes (0.619 → ~0.623), at viol ≤ 0.001. This is a polish gap, not a chasm — the branch's own best (c0075f) has never even been officially readjudicated.
+2. **Every move so far is a *scalar* move.** `base`/`curv` sweeps walk one axis; c0063 probed one *random* direction; c0047 descended coordinates *sequentially* (timed out, budget-discipline.md). **No candidate has ever fit a curvature-aware model of `shaped_score` across several modes simultaneously and stepped to its constrained optimum.** L is set by the single sharpest boundary feature, and a diagonal one-axis scaling provably cannot target it — hence the (0.5,0.7) "strict optimum" that four analysts have watched hold.
+3. **The one near-bar basin (top bank seed ~0.6361) is Pareto-blocked to *mode removal*** (anisotropic-exp c0055f, high-mode damping c0057, truncation — all collapse to the 0.6237 floor). Every refuted engagement *subtracts* spectral content; none added a coordinated shaping move.
+
+## Decision: **pivot** — mechanism, not basin family
+Not a new random basin (HINT flags **NAE-from-scratch = AVOID**; grafting/n-diff/SPSA/truncation refuted). The pivot is the **one lever the search keeps circling but has never executed budget-safely: a data-driven coordinated ascent.** Concretely a **low-dimensional model-based trust-region DFO step** — a textbook method for expensive black-box functions (subspace trust-region surrogates / 2D-MoSub, [arXiv:2309.14855](https://arxiv.org/pdf/2309.14855); metric-aware quadratic TR, [arXiv:2605.30845](https://arxiv.org/html/2605.30845); stellarator BO with dimensionality reduction, [arXiv:2606.19523](https://arxiv.org/html/2606.19523)). It is **budget-safe** where nevergrad/SPSA/coordinate-descent all starved: the entire gradient+curvature estimate is **one batched `eval_many` design** (2·k evals, ~1.4 s each on nfp=3), not a per-coordinate sequential loop.
+
+Why this is *not* a re-proposal of anything refuted: it is neither anisotropic-exp, nor truncation, nor cross-nfp grafting, nor a single-axis grid, nor the *random* single-direction line-search of c0063, nor the *sequential* CD of c0047. It fits a **curvature-aware diagonal quadratic across 6 coordinated modes at once** and steps to its constrained optimum — the "coordinated multi-mode move that leaves the ball while holding feasibility" the task brief itself names as the open game.
+
+## Proposal (the ONE candidate injected)
+`INJECT/1-surrogate-trustregion-ascent.py`:
+- **Floor (guaranteed non-regressing):** apply the proven R/Z contraction depth sweep to the hardcoded B1 blob **plus the top-3 same-nfp (=3) bank seeds retrieved at runtime** (reproduces the B3 lhhhhappy3 ≈0.6250 escape without hardcoding a blob I can't fully read), in **one** batched `eval_many` (≤8 evals). Pick the best feasible as anchor.
+- **Surrogate ascent:** around that anchor, perturb the **6 dominant shaping modes** (`r_cos/z_sin` at (m=0,n=1), (m=1,n=0), (m=1,n=1)) by ±1 % in **one batched ±design (12 evals)**. Fit a diagonal quadratic `s ≈ s0 + g·x + ½c·x²`; take the **curvature-aware trust-box step** (interior optimum `−g/c` where concave, else to the box edge along the gradient) across all coordinates simultaneously; evaluate the step + two shrink hedges (3 evals).
+- **Gates (obey lf-selection-bug.md):** select by **train shaped first**; a surrogate point may win only if it beats the floor key by `EPS` **and** passes the LF gate (`shaped>0`, `log10_qi ≤ −4.005`) **and** `bank_dist ≥ 1.03e-3`. LF is a strengthening gate; on failure it retreats to the LF-checked contracted-B1 anchor. Hard time/budget guards (`≤22 evals`, deadline 222 s).
+- **Expected effect (falsifiable):** the coordinated step reaches a nearby point with higher min gradient-scale-length L than the (0.5,0.7) strict optimum, lifting **train shaped to ≥ 0.6255 + ~0.001–0.003** at viol ≤ 0.001 — closing the +0.004 vlf gap toward 0.6361. If the fitted step fails the LF margin, it returns the exact floor anchor (**no regression**). Kill criterion: if the surrogate step never beats the floor across two injections, coordinated *diagonal* ascent in this basin is refuted and only a genuinely new basin (guided-NAE, despite the AVOID flag) remains.
+
+## Decision log (alternatives considered and rejected)
+- **CONTINUE contraction depth/curv sweeps** — rejected: exhausted; provably capped at official ~0.633 (readjudication), and (0.5,0.7) confirmed a strict single-axis optimum by c0073/c0075.
+- **REVIVE B1 c0003f 0.6330 / B2 0.6263 escapes** — rejected: both officially *below* the current 0.633 best; reviving them regresses.
+- **Engage the top bank seed (0.6361) by mode-damping/truncation** — rejected: refuted three times (c0055f/c0057/c0060f), collapses to the 0.6237 floor.
+- **NAE-from-scratch / new random basin** — rejected: explicitly HINT-flagged AVOID (high variance, 72-eval budget too small to drive a raw NAE seed to feasibility). Held in reserve as the *only* remaining move if diagonal surrogate ascent also fails.
+- **Cross-nfp mode grafting / same-nfp homotopy** — rejected: grafting refuted (mode-grafting-and-blends.md); the same-nfp homotopy was just tried (c0079) and rejected.
+- **Full nevergrad / SPSA / sequential coordinate descent** — rejected: all starve the 240 s / 720 s budget (c0022/c0025/c0030/c0047 timeouts; spsa-ascent.md). The surrogate captures the *same* curvature information in a single batched design instead of a sequential loop — the specific fix that makes data-driven ascent budget-feasible here.
+
+Sources: [ConStellaration benchmark (arXiv:2506.19583)](https://arxiv.org/abs/2506.19583); [subspace trust-region DFO / 2D-MoSub (arXiv:2309.14855)](https://arxiv.org/pdf/2309.14855); [metric-aware quadratic trust-region (arXiv:2605.30845)](https://arxiv.org/html/2605.30845); [stellarator Bayesian optimization with dimensionality reduction (arXiv:2606.19523)](https://arxiv.org/html/2606.19523).

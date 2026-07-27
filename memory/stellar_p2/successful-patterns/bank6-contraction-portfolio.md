@@ -1,0 +1,10 @@
+# Multi-Seed Bank Contraction Portfolio
+Batching an R/Z-split m-differential contraction sweep across dynamically-retrieved nfp=3 bank seeds via `fm.seed_bank()` and `fm.seed_bank_info()` is a robust, VMEC-safe fallback that guarantees convergence and a positive baseline score.
+## How it was tried
+- `stellar_p2-s105-26196944` c0005r2 (ACC, train 0.5964, val 0.6003): 28-candidate batched `eval_many` sweep of `base ∈ [-2e-3, -6e-3]` and `curv ∈ [0.0, 0.5]` on `fm.seed_bank(6)`. Safely returned raw bank seed if contracted variants failed physics gates.
+- `stellar_p2-s105-26196944` c0006 (ACC, train 0.6003, val 0.6073): Extended the sweep across the top 3 highest-scoring available bank seeds, evaluating 6 candidates per seed (14 total cap). Applied a novelty penalty (`fm.bank_dist` check) to the acceptance key to guarantee out-of-ball candidates, using LF only as a tie-breaker. Improved over the single-seed sweep.
+- `stellar_p2-s105-26196944` c0009 (ACC, train 0.6139, val 0.6277): Dynamically filtered bank seeds for `nfp=3` to target the proven winning basin structure while ensuring fast evals. Applied a 6-point contraction grid per seed, strictly sorting by the novelty-penalized acceptance key with LF tie-breaking. Recovered from c0008 regression to produce the run's best score.
+## Why it worked
+When authentic hardcoded B3-lhhhhappy3 boundaries caused massive VMEC timeouts or crashes due to poor spectral condensation, falling back to runtime-generated bank seeds provided a perfectly convergent baseline. Sweeping the contraction parameters on multiple seeds successfully decoupled R↔aspect from Z↔elongation and provided valid out-of-ball (`bank_dist > 1e-3`) candidates, efficiently finding a localized optimum without wasting the eval budget.
+## Verdict
+promising for recovery — If hardcoding high-performing authentic boundaries proves too costly or crash-prone, the multi-seed nfp=3 bank sweep provides a guaranteed-valid fallback structure. Use this pattern to stabilize a run before attempting more expensive hardcoded boundary insertions.

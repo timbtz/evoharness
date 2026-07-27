@@ -1,0 +1,36 @@
+# Analyst notes — stellar_p2-s105-72881323 @ 72 candidates
+
+The module Write is gated by this session's permission mode (the same block the @36/@48/@60 analysts hit) — the complete standalone module is ready in my Write call above and needs approval to land at `INJECT/1-reduced-gradient-ridge-ascent.py`. Below is the decision record.
+
+---
+
+# Analyst notes — stellar_p2-s105-72881323 @ 72 candidates
+
+## What the search is doing
+For 72 candidates the branch **B4-risoliao4** has polished a **fixed tri-basin portfolio** — B1 (nfp=3, hardcoded, official 0.6321–0.6330), B3 lhhhhappy3 (nfp=3, official ~0.6330), B4 RisoLiao (nfp=4, official 0.6236) — with **one hand-picked search axis**: the c0009 R/Z-split m-differential contraction `factor = 1 + base·(1 + curv·(m−1))`, `base≈−3e-3`, `(cr,cz)=(0.5,0.7)`. Best is **c0059 (acc, train 0.6250, val 0.6365, bank_dist ~0.0026)** — a margin-strict reselection of the c0029 boundary, not a new basin or a new high.
+
+The recent window (c0052→c0060) is **all rejected/errored**: train-key reselection (c0052), fine B4 grid (c0053), m=1-row-selective contraction (c0054), anisotropic `exp(−a_m·m−a_n·|n|)` on B3/B4 (c0055) and on the **top bank seed** (c0055f → fell back to the B4 floor 0.6237), quadratic contraction (c0056 ERR), m≥2 high-mode damping on top bank seed (c0057 → 0.6237 floor), B1↔B4 mode-grafting (c0058), and B3↔B4 grafting (c0060 ERR). c0059's own "new move" (envelope-shift on the m=1 axisymmetric row) did not survive selection either. The wiki marks base-shifts, power-law, recombination/grafting, n-differential, SPSA, random grids, tapers, mode-erasure, truncation, m=1-selective, and anisotropic-exp **all exhausted/refuted**.
+
+## Binding problem(s) now
+1. **The honest official ceiling of every basin the branch touches is ~0.6330 — below the 0.6361 bar.** `runs/dag/escape_readjudication.json` is decisive: `vlf_viol 0.00075 → official 0.6321`; `0.0071 → 0.6330`; B2 `0.0039 → 0.6263`; `vlf_shaped 0.6044 → official 0.0` (feas 0.277 blowup). c0059's val 0.6365 maps to official ≈0.633. **A portfolio cannot exceed its best basin**, so no contraction depth or scale/shift on 0.623/0.633 seeds can ever cross the bar.
+2. **The only near-bar basin (top bank seed ~0.6361) is physically Pareto-blocked, not just expensive.** Three distinct engagements — anisotropic exp (c0055f) and high-mode damping (c0057) — both collapsed straight to the B4 fallback floor (0.6237). Leaderboard #1 is already L-maximized at its QI feasibility wall; any structural move raises the QI residual. Re-proposing "top-bank anisotropic escape" (still marked *promising* in the wiki) would re-run something the ledger has now effectively **refuted**.
+3. **Every move so far is a scale/shift of existing modes along ONE fixed hand-picked axis.** No candidate has ever estimated a **data-driven ascent direction** — the three that tried to (SPSA c0035f, nevergrad, adaptive coord-descent c0047) all **starved** the 240s/720s budget by iterating. The incumbent is optimal only within the 4-D `(base,curv_r,curv_z)` family, **not** the full ~100-D Fourier space.
+
+## Decision: **pivot** — mechanism (a new search direction), not basin family
+The wiki flags NAE-from-scratch and blends/grafts as AVOID/refuted, and the top-bank escape is now empirically dead. The one genuinely untried, budget-safe lever is a **data-driven local ascent direction** for L computed **without iteration**. `minimum_normalized_magnetic_gradient_scale_length` is a *min over the surface* set by the single worst-curvature spot ([Kappel/Landreman, arXiv:2309.11342](https://arxiv.org/abs/2309.11342)); uniform/differential contraction cannot localize to it. A **reduced-gradient / active-set projection step** ([active-set box-constrained optimization, math.lsu.edu/box.pdf](https://www.math.lsu.edu/~hozhang/papers/box.pdf)) moves in the *null space of the binding constraints* — exactly the directions ORTHOGONAL to the exhausted contraction axis. The reason prior direction-estimation starved is that they *iterated*; doing the forward-difference screen as **one batched `eval_many`** removes that failure mode.
+
+## Proposal (the ONE candidate I inject)
+**`INJECT/1-reduced-gradient-ridge-ascent.py` — single-batch reduced-gradient "ridge follow" on the B3 incumbent.**
+- **Idea:** Around the exact c0059 B3 contraction incumbent, run ONE batched forward-difference screen over the ~10 highest-amplitude mid-poloidal modes (m=2..5, |n|≤2; skip m=1/aspect). For each, measure `dL` and the feasibility gradient `dg`. Keep modes with a **train-detectable** `dL` (|dL|>8e-4, above the train-blindness noise floor) whose ascent sign does **not** worsen feasibility (`dg_signed ≤ 2e-3`) — the reduced-gradient free set. Then take a few **coordinated multi-mode steps** stacking those per-mode L-gains (line search α∈{0.6,1.0,1.7}) plus deeper single-mode fallbacks, in a second batched `eval_many`.
+- **Mechanism / why it can exceed 0.633:** it explores directions orthogonal to the 4-D contraction family in which the incumbent is provably *not* optimal; a coordinated few-e-3 move is structural (grows the already-0.0026 bank_dist, scale-normalized) so it leaves the novelty ball.
+- **Expected effect:** if untapped ascent directions exist, L rises past the contraction cap → a new high and a distinct archive point; if the screen finds no train-detectable ascent (train-blind), it returns the **exact c0059 incumbent (val 0.6365)** — non-regressing by construction. Selection uses the proven HINT rule: LF-verify, gate viol≤0.001 & log10_qi≤−4.005 & bank_dist≥1.03e-3, max shaped. Budget ≈21/72 evals, no iteration, hard wall-clock guards (`T_NO_LAUNCH=205`, `DEADLINE=225`).
+
+## Decision log (alternatives considered and rejected)
+- **Continue contraction/portfolio tuning** — rejected: official-capped at ~0.633 < bar; 9 straight rejects; wiki-exhausted.
+- **Revive top-bank anisotropic/high-mode-damping escape** (wiki "promising", Open direction #1) — rejected: c0055f **and** c0057 both fell to the B4 floor; #1 is Pareto-blocked at its QI wall, not merely eval-expensive. Empirically refuted this run.
+- **Revive blends / mode-grafting** (c0033/c0058/c0060) — rejected: errored or regressed; wiki-refuted.
+- **SPSA / nevergrad / adaptive coordinate descent** (c0035f/c0047) — rejected as *implemented* (iterative → budget starvation); my proposal keeps the data-driven-direction *goal* but removes iteration via a single batched screen — the specific reason those failed.
+- **NAE-from-scratch new nfp basin (e.g. nfp=2)** — rejected: HINT flags AVOID; 72 evals too thin to drive a shaped≈−0.5 seed to feasibility; high variance.
+- **m=1 envelope-shift** (c0059's own new move) — rejected: didn't survive selection; the ridge screen deliberately *skips* m=1 (aspect-dominant, exhausted) and targets the mid-m curvature modes that actually set the min-L.
+
+Sources: [ConStellaration benchmark (arXiv:2506.19583)](https://arxiv.org/abs/2506.19583) · [Magnetic gradient scale length ↔ coil distance, Kappel & Landreman (arXiv:2309.11342)](https://arxiv.org/abs/2309.11342) · [Active-set / reduced-gradient box-constrained optimization (math.lsu.edu)](https://www.math.lsu.edu/~hozhang/papers/box.pdf)
