@@ -11,4 +11,11 @@ cd "$(dirname "$0")"
 # s105 + s103-89260631); 120s+15 still got blown by a single high-mode re-score
 # under load (s103-92006336). 180s still bounds true VMEC hangs.
 export STELLAR_TRAIN_OVERRIDES='{"max_evals":160,"cpu_budget":480.0,"eval_timeout":180.0}'
+# Campaign 2 (2026-07-27): train/val fitness = p2 - 0.92*max(0, feas - 0.002), and
+# the novelty ramp is widened past the 1e-3 export bar to 3e-3 — campaign 1's
+# champion cleared 1e-3 at bank_dist 2.6e-3 while being cosine 0.999989 to the
+# public #1 boundary, so the old ramp switched off exactly where the near-copies
+# live. Export guard itself is unchanged (hard 1e-3); this only shapes the search.
+export STELLAR_MARGIN='{"target":0.002,"slope":0.92}'
+export STELLAR_NOVELTY='{"min":0.003,"pen":0.05}'
 exec .venv/bin/uvicorn api.server:app --host 0.0.0.0 --port 8777

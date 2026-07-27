@@ -59,25 +59,37 @@ GLOBAL_USD = 120.0               # whole-campaign z.ai cap (user 2026-07-24:
 GENERATIONS = 200
 POLL_S, RUN_TIMEOUT_S = 45, 20 * 3600
 
-# Leaf branches: promising AND different. Bank facts (official / violation of 0.010):
+# Campaign 2 leaves (2026-07-27, honest-score pipeline). Campaign 1's verdict:
+# its 0.6400 champion bought its whole margin over davidkh's 0.6361 from the
+# feasibility tolerance (93% of it vs his 7.5%) and sat cosine 0.999989 from his
+# public boundary. Under the margin-discounted fitness that candidate is worth
+# honest 0.6320 — BELOW the public bar. So this campaign's target is explicit:
+#   honest_score >= 0.6361  AND  bank_dist >= 1e-3  AND  bank_cos clearly < 0.9999.
+# N1/N2 restart campaign 1's two strongest evolved OPTIMIZERS under the new
+# fitness — the machinery is worth keeping, the tolerance camping is not; they
+# re-derive where their score comes from. N3/N4 are fresh basins picked for
+# margin headroom (both zero-violation seeds, so nothing to unlearn). N5 is the
+# unaided path. Bank facts (official / violation of 0.010):
 #  #0 davidkh    0.6361 / 0.00075  — leaderboard #1 boundary itself
 #  #3 lhhhhappy  0.6257 / 0.0      — zero violation: maximum margin headroom
 #  #4 RisoLiao   0.6236 / 0.0      — zero violation, distinct author basin
 #  #6 RisoLiao   0.6071 / 0.0      — earlier, structurally different RisoLiao optimum
-#  #8 Elahehkazemi 0.4989 / 0.0    — most recent independent basin (diversity for merges)
-# B1 keeps the evolved incumbent (phanerozoic-family basin via s17's triage).
+#  #8 Elahehkazemi 0.4989 / 0.0    — most recent independent basin
 LEAVES = [
-    {"name": "B1-incumbent", "resume": "stellar_p2-s17-78763752", "pin": None,
-     "desc": "s17 best (margin-aware polish + momentum line search; triaged basin)"},
-    {"name": "B2-davidkh0", "pin": 0,
-     "desc": "bank #0 davidkh 0.6361: polish the leaderboard #1 boundary itself"},
-    {"name": "B3-lhhhhappy3", "pin": 3,
-     "desc": "bank #3 lhhhhappy 0.6257, violation 0.0: spend margin headroom on L"},
-    {"name": "B4-risoliao4", "pin": 4,
-     "desc": "bank #4 RisoLiao 0.6236, violation 0.0: distinct basin, margin headroom"},
-    {"name": "B5-risoliao6", "pin": 6,
-     "desc": "bank #6 RisoLiao 0.6071, violation 0.0: second RisoLiao optimum"},
-    {"name": "B6-nae-independent", "pin": "nae",
+    {"name": "N1-honest-champion", "resume": "stellar_p2-s105-26196944", "pin": None,
+     "desc": "campaign-1 champion program (c0045, official 0.6400 at feasibility "
+             "0.0093 => honest 0.6320) re-run under margin-discounted fitness: "
+             "keep the two-stage m-contraction machinery, pay back the tolerance"},
+    {"name": "N2-honest-risoliao4", "resume": "stellar_p2-s105-72881323", "pin": None,
+     "desc": "campaign-1 B4 lineage (c0088r1, official 0.6398) — second evolved "
+             "optimizer, distinct RisoLiao #4 basin, same honest re-derivation"},
+    {"name": "N3-lhhhhappy3", "pin": 3,
+     "desc": "bank #3 lhhhhappy 0.6257, violation 0.0: the seed whose profile the "
+             "honest metric most favours — full 0.008 of unspent margin headroom"},
+    {"name": "N4-elaheh8", "pin": 8,
+     "desc": "bank #8 Elahehkazemi 0.4989, violation 0.0: the most independent "
+             "public basin — low score but the furthest from the davidkh shape"},
+    {"name": "N5-nae-independent", "pin": "nae",
      "desc": "independent basin: NAE seeds only, no bank triage — the only fully "
              "own-result path; expect negative shaped scores, terminate fast if stuck"},
 ]
@@ -216,11 +228,17 @@ def branch_hint(st, branch) -> str:
     parts = [f"DAG campaign branch {branch['name']}: {branch['desc']}. "
              f"Terminate rule: {STALL} candidates without a new best ends the branch — "
              "make every candidate count; surgical, distinct, evidence-grounded ideas.",
-             "SUBMITTABILITY BAR (the campaign's whole point): official > 0.6361 AND "
-             "max-coeff distance >= 1e-3 from EVERY bank seed. Near-copies inside the "
-             "1e-3 ball pay up to 0.05 penalty at train/val (metrics: bank_dist, "
-             "novelty_penalty) and are refused at export. Escaping the ball while "
-             "holding feasibility is worth more than +0.001 of polish."]
+             "THE BAR (the campaign's whole point, tightened 2026-07-27): "
+             "honest_score >= 0.6361 AND max-coeff distance >= 1e-3 from EVERY bank "
+             "seed AND a bank_cos clearly below 0.9999. honest_score = p2_score - "
+             "0.92*max(0, feasibility - 0.002) is what train/val fitness now IS: the "
+             "previous campaign's 0.6400 came from spending 93% of the 1% feasibility "
+             "tolerance and is only honest 0.6320 — below the public bar it appeared "
+             "to beat, and cosine 0.999989 from davidkh's public boundary. Do not "
+             "repeat that. Buy score with structure at feasibility <= 0.002; treat "
+             "aspect-ratio tolerance as already spent. Near-copies pay up to 0.05 "
+             "novelty penalty at train/val (metrics: bank_dist, bank_cos, "
+             "novelty_penalty) and are refused at export."]
     if branch.get("merge_from_run"):
         parts.append("This is a MERGE branch: combine Approach A (incumbent) with "
                      "Approach B shown in the prompt — integrate mechanisms, don't pick one.")
@@ -383,7 +401,10 @@ def main():
     save_state(st)
 
     # phase 1: leaves, sequential
-    for b in [x for x in st["branches"] if x.get("pin") is not None or x["name"].startswith("B")]:
+    # leaves = every branch that is not a merge (was: pin is not None or name
+    # startswith "B" — which silently skipped campaign-2's resume-based leaves,
+    # whose pin is None and whose names start with "N")
+    for b in [x for x in st["branches"] if not x.get("merge_from_run")]:
         if b["status"] in ("done", "capped", "user_stop"):
             continue
         run_branch(st, b)

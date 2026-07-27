@@ -106,3 +106,13 @@ raw number, so a run's headline result is undistorted. Practical consequence:
 squeezing the last 0.001 of aspect-ratio tolerance is now worth roughly nothing,
 and a boundary that reaches the same L at feasibility 0.002 beats one that needs
 0.009. Raise L by structure.
+
+SHAPE NOVELTY, NOT JUST DISTANCE (2026-07-27): max-coefficient distance is a
+weak novelty test. The previous campaign's champion cleared the 1e-3 export ball
+at bank_dist 2.6e-3 while being cosine 0.999989 to the public #1 boundary — the
+same shape, rescaled. Every val/private metrics dict now also reports "bank_cos",
+the cosine to the nearest same-nfp bank seed, and this campaign widens the
+train/val novelty ramp beyond the export bar (see STELLAR_NOVELTY), so the
+penalty keeps pointing out of the public basin instead of switching off the
+moment a candidate is barely exportable. A genuinely different design shows up
+as a bank_cos meaningfully below 0.9999, not merely a distance above 1e-3.

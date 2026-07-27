@@ -56,9 +56,24 @@ def solve(fm, rng):
         info = []
     for e in info[:4]:
         b = fm.seed_bank(e["i"])
-        s = fm.score(fm.eval(b))
+        # bank boundaries are known-good leaderboard submissions and never truly
+        # hang VMEC; a timed-out eval (host CPU contention) returns None/-inf,
+        # so retry instead of silently falling through to the NAE portfolio
+        s = float("-inf")
+        for _retry in range(3):
+            s = fm.score(fm.eval(b))
+            if s > float("-inf"):
+                break
         if s > best_s:
             best_b, best_s = b, s
+    forced_bank = False
+    if best_b is None and info:
+        # bank boundaries are known-good leaderboard submissions: when every
+        # triage eval died anyway (timeouts under host CPU contention -> -inf,
+        # cost runs s105/s103-* 2026-07-25), adopt the top-ranked entry rather
+        # than silently falling through to the NAE portfolio; the polish loop's
+        # first successful eval sets the real baseline
+        best_b, forced_bank = fm.seed_bank(info[0]["i"]), True
     if best_b is None:                          # no bank: NAE portfolio fallback
         for nfp, mp in ((3, 1), (4, 1), (3, 2)):
             try:
@@ -79,7 +94,7 @@ def solve(fm, rng):
     # bank seeds are already polished solutions in a RAZOR-thin feasible basin:
     # sigma 0.008 already blows feasibility 0.001 -> 0.2-0.3, so polish with
     # micro-steps and never inflate
-    polished_start = best_s > 0
+    polished_start = best_s > 0 or forced_bank
     sigma, stall, inflated = (0.0012 if polished_start else SIGMA0), 0, polished_start
     while fm.remaining() > 0:
         # batch of 2: fm.eval_many runs them on parallel workers (~half the

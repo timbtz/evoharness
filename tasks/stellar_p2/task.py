@@ -130,9 +130,17 @@ import multiprocessing as _mp
 _CTX = _mp.get_context("fork")
 _POOL = _CTX.Pool(CFG["workers"])
 
-_GRACE = 60.0  # container may overrun cpu_budget by this much, no more
+_GRACE = 60.0  # a SEARCH batch may overrun cpu_budget by this much, no more
+# The container's own hard deadline: the host kills it at cpu_budget + slack, so
+# stop a little before that and leave the remainder for pool teardown + emitting
+# the JSON payload. The final re-score is mandatory, unmetered work that by
+# construction starts AFTER the search has spent cpu_budget — clamping it to the
+# search deadline floors it at 5s and -infs every candidate that uses its full
+# budget (first candidate of campaign 2, 2026-07-27). The slack is exactly what
+# it must be allowed to spend.
+_HARD = CFG["cpu_budget"] + CFG.get("slack", 240.0) - 45.0
 
-def _pool_eval(batch, fidelity=None):
+def _pool_eval(batch, fidelity=None, final=False):
     global _POOL
     limit = CFG["eval_timeout"] * _math.ceil(len(batch) / CFG["workers"]) + 15.0
     if fidelity == "low_fidelity":
@@ -143,7 +151,8 @@ def _pool_eval(batch, fidelity=None):
     # cpu_budget+_SLACK: the candidate is killed, returns -inf, and its whole
     # slot plus ~12 min of wall clock is lost. 37 of 456 campaign candidates died
     # exactly this way, 30% of all eval wall-clock (audit 2026-07-27).
-    limit = min(limit, max(CFG["cpu_budget"] + _GRACE - (time.monotonic() - _T0), 5.0))
+    deadline = _HARD if final else CFG["cpu_budget"] + _GRACE
+    limit = min(limit, max(deadline - (time.monotonic() - _T0), 30.0 if final else 5.0))
     try:
         return _POOL.map_async(_worker, [(b, fidelity) for b in batch]).get(limit)
     except _mp.TimeoutError:
@@ -242,7 +251,7 @@ try:
     # transient hard-timeout under host CPU contention must not -inf a full run
     # whose returned boundary is fine (cost run s103-92006336, 2026-07-25)
     for _retry in range(3):
-        _ok, _err = _pool_eval([_boundary])[0]
+        _ok, _err = _pool_eval([_boundary], final=True)[0]
         if _ok is not None:
             break
     if _ok is None:
@@ -312,7 +321,17 @@ def _bkey(boundary: dict) -> str:
     return f'{boundary.get("n_field_periods", 1)}-{h}'
 
 
-_NOVELTY_MIN, _NOVELTY_PEN = 1e-3, 0.05  # export guard refuses < 1e-3 (submit_export)
+_EXPORT_MIN = 1e-3               # submit_export's hard refusal bar (never shaped)
+# Train/val novelty ramp. The audit found max-coefficient distance is a WEAK
+# novelty measure: the 0.6400 champion sat at bank_dist 2.6e-3 — outside the
+# export ball — while being cosine 0.999989 to davidkh's public #1 boundary,
+# i.e. the same shape. Widening the ramp past the export bar keeps the gradient
+# pointing out of the public basin instead of switching off the moment a
+# candidate is barely exportable. Per-campaign knob, default = the old behaviour:
+#   STELLAR_NOVELTY='{"min":0.003,"pen":0.05}'
+_NOVELTY = {"min": 1e-3, "pen": 0.05}
+_NOVELTY.update(json.loads(os.environ.get("STELLAR_NOVELTY", "{}")))
+_NOVELTY_MIN, _NOVELTY_PEN = float(_NOVELTY["min"]), float(_NOVELTY["pen"])
 
 
 def _scale_norm(boundary: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -327,12 +346,14 @@ def _scale_norm(boundary: dict) -> tuple[np.ndarray, np.ndarray]:
     return rc / s, zs / s
 
 
-def bank_distance(boundary: dict) -> float | None:
-    """Max-coefficient distance to the closest same-nfp public seed-bank
-    boundary, scale-normalized and padded to a common canvas — the export
-    guard's exact metric."""
+def bank_kin(boundary: dict) -> tuple[float | None, float | None]:
+    """(max-coefficient distance, cosine) to the closest same-nfp public seed-bank
+    boundary, scale-normalized and padded to a common canvas. The distance is the
+    export guard's exact metric; the cosine is what that distance hides — a
+    boundary can clear the 1e-3 ball and still be cosine 0.999989 to a public
+    submission, i.e. the same shape rescaled (audit 2026-07-27)."""
     if not _BANK:
-        return None
+        return None, None
 
     def pad_to(a, shape):
         out = np.zeros(shape)
@@ -342,17 +363,27 @@ def bank_distance(boundary: dict) -> float | None:
         return out
 
     rc0, zs0 = _scale_norm(boundary)
-    best = None
+    best, cos = None, None
     for e in _BANK:
         bb = e["boundary"]
         if bb.get("n_field_periods") != boundary.get("n_field_periods"):
             continue
         rc1, zs1 = _scale_norm(bb)
         shape = (max(rc0.shape[0], rc1.shape[0]), max(rc0.shape[1], rc1.shape[1]))
-        d = max(np.abs(pad_to(rc0, shape) - pad_to(rc1, shape)).max(),
-                np.abs(pad_to(zs0, shape) - pad_to(zs1, shape)).max())
-        best = d if best is None else min(best, d)
-    return best
+        a0, b0 = pad_to(rc0, shape), pad_to(rc1, shape)
+        a1, b1 = pad_to(zs0, shape), pad_to(zs1, shape)
+        d = max(np.abs(a0 - b0).max(), np.abs(a1 - b1).max())
+        if best is None or d < best:
+            x = np.concatenate([a0.ravel(), a1.ravel()])
+            y = np.concatenate([b0.ravel(), b1.ravel()])
+            n = float(np.linalg.norm(x) * np.linalg.norm(y))
+            best, cos = d, (round(float(x @ y / n), 6) if n else None)
+    return best, cos
+
+
+def bank_distance(boundary: dict) -> float | None:
+    """Distance half of bank_kin — submit_export's guard imports this name."""
+    return bank_kin(boundary)[0]
 
 
 # Feasibility-margin shaping (audit 2026-07-27). The official rule accepts any
@@ -512,9 +543,11 @@ class _StellarP2Task:
         boundary = self._bcache[sha]
         res = verify_boundary(boundary, official=(split == "private"),
                               fidelity=_FIDELITY.get(split, "low_fidelity"))
-        d = bank_distance(boundary)
+        d, cos = bank_kin(boundary)
         if not res.error and d is not None:
             res.metrics["bank_dist"] = round(d, 6)
+            if cos is not None:
+                res.metrics["bank_cos"] = cos
         if not res.error and split in ("val", "private"):
             kind = "official" if split == "private" else _FIDELITY[split]
             self._archive([{"shaped": res.metrics.get("shaped_score", res.score),
@@ -524,8 +557,8 @@ class _StellarP2Task:
                             "boundary": boundary}], sha, kind)
         if split == "private":
             if not res.error:
-                res.metrics["submittable"] = bool(
-                    res.score > 0 and (d is None or d >= _NOVELTY_MIN))
+                res.metrics["submittable"] = bool(   # export guard's bar, not the
+                    res.score > 0 and (d is None or d >= _EXPORT_MIN))  # ramp's
                 p2, fe = res.metrics.get("p2_score"), res.metrics.get("feasibility")
                 if p2 and fe is not None:  # reported, never subtracted from truth
                     res.metrics["honest_score"] = round(
@@ -538,6 +571,8 @@ class _StellarP2Task:
         cfg = {**_TRAIN, "fidelity": _FIDELITY["train"],
                "margin_target": _MARGIN["target"],
                "margin_slope": _MARGIN["slope"],
+               "slack": _SLACK,   # container's own deadline = cpu_budget + this
+
                "seed_bank": [{"boundary": e["boundary"],
                               "score": e["official_score"],
                               "feasibility": e["official_feasibility"]}
@@ -560,9 +595,11 @@ class _StellarP2Task:
                               seconds=res.seconds)
         sha = _sha(code)
         self._bcache[sha] = boundary
-        d = bank_distance(boundary)
+        d, cos = bank_kin(boundary)
         if d is not None:
             m["bank_dist"] = round(d, 6)
+            if cos is not None:
+                m["bank_cos"] = cos
         try:
             self._archive(arch + [{"shaped": res.score, "p2": m.get("p2_score"),
                                    "feasibility": m.get("feasibility"),
