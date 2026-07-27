@@ -185,6 +185,32 @@ def run_end_of(run_id: str) -> dict | None:
     return None
 
 
+# A working run writes a ledger event at least every candidate (~10-12 min at
+# stellar_p2 eval cost). Two hours of silence means the run is gone — the server
+# was restarted, the thread died, or it is wedged. Same threshold decides "still
+# live, reattach" and "dead, move on", so the two can never both be false.
+_LIVE_S = 7200
+
+
+def _ledger_age(run_id: str) -> float:
+    led = ROOT / "runs" / run_id / "ledger.jsonl"
+    return time.time() - led.stat().st_mtime if led.exists() else 9e9
+
+
+def _is_live(run_id: str) -> bool:
+    """True if run_id has no run_end and its ledger is still being written."""
+    return run_end_of(run_id) is None and _ledger_age(run_id) < _LIVE_S
+
+
+def _has_candidate(run_id: str) -> bool:
+    """resume_from needs a candidate to resume from; a run that produced none
+    would 422 the launch and crash the driver on its retry loop."""
+    led = ROOT / "runs" / run_id / "ledger.jsonl"
+    if not led.exists():
+        return False
+    return '"type": "candidate"' in led.read_text()
+
+
 def wait_for(run_id: str) -> dict:
     t0 = time.time()
     stopped = False
@@ -192,6 +218,14 @@ def wait_for(run_id: str) -> dict:
         ev = run_end_of(run_id)
         if ev is not None:
             return ev
+        if _ledger_age(run_id) > _LIVE_S:
+            # Do not sit on a corpse for 20h. Note the stop_reason deliberately
+            # does NOT start with "stall": that word terminates the branch, and a
+            # dead run is not evidence the branch is out of ideas.
+            log(f"DEAD {run_id}: no ledger activity for {_LIVE_S / 3600:.0f}h")
+            (ROOT / "runs" / run_id / "STOP").touch()
+            return {"stop_reason": f"dead: no ledger activity for {_LIVE_S / 3600:.0f}h",
+                    "usd": 0.0, "seconds": round(time.time() - t0)}
         if time.time() - t0 > RUN_TIMEOUT_S and not stopped:
             log(f"TIMEOUT {run_id}: touching STOP")
             (ROOT / "runs" / run_id / "STOP").touch()
@@ -259,7 +293,15 @@ def run_branch(st, branch):
             branch["status"] = "capped"
             return
         busd = sum(r.get("usd") or 0.0 for r in branch["runs"])
-        resume = branch["runs"][-1]["run_id"] if branch["runs"] else branch["resume"]
+        # Resume from the most recent run that actually produced a candidate: a
+        # run that died before its first one has nothing to resume FROM, and
+        # pointing resume_from at it 422s the launch three times and crashes the
+        # driver. Fall back through the branch's history to its original seed.
+        resume = branch["resume"]
+        for r in reversed(branch["runs"]):
+            if _has_candidate(r["run_id"]):
+                resume = r["run_id"]
+                break
         cfg = {"task": "stellar_p2", "seed": seed_n + len(branch["runs"]),
                "switches": SWITCHES,
                "budget": {"max_usd": min(RUN_USD, BRANCH_USD - busd),
@@ -272,10 +314,20 @@ def run_branch(st, branch):
                "resume_from": resume}
         if branch.get("merge_from_run"):
             cfg["merge_from"] = branch["merge_from_run"]
-        run_id = launch(cfg, branch_hint(st, branch))
-        log(f"{branch['name']}: launched {run_id} (resume={resume})")
-        branch["runs"].append({"run_id": run_id})
-        save_state(st)
+        # Attach to an in-flight run instead of starting a second one. The driver
+        # may be restarted (code change, crash) while the server thread it
+        # launched is still evaluating; relaunching then puts two stellar runs on
+        # the same 4 vCPUs, which is the documented way to make every eval time
+        # out. main()'s recovery leaves the live run's stop_reason unset for us.
+        last = branch["runs"][-1] if branch["runs"] else None
+        if last and not last.get("stop_reason") and _is_live(last["run_id"]):
+            run_id = last["run_id"]
+            log(f"{branch['name']}: attaching to in-flight {run_id}")
+        else:
+            run_id = launch(cfg, branch_hint(st, branch))
+            log(f"{branch['name']}: launched {run_id} (resume={resume})")
+            branch["runs"].append({"run_id": run_id})
+            save_state(st)
         end = wait_for(run_id)
         branch["runs"][-1].update(
             stop_reason=end.get("stop_reason"), best_id=end.get("best_id"),
@@ -293,6 +345,25 @@ def run_branch(st, branch):
             branch["status"] = "user_stop"
             st["halt"] = "user stopped a run — campaign paused"
             return
+        # Provider out of money: every relaunch fails the same way in seconds, so
+        # the driver would burn the branch's run list spinning. Campaign 1 did
+        # exactly this on 2026-07-27 until a human noticed. Halt instead.
+        if "1113" in sr or "nsufficient balance" in sr:
+            branch["status"] = "pending"
+            st["halt"] = ("z.ai balance exhausted (429/1113) — recharge, then "
+                          "relaunch the driver; it reattaches and continues")
+            return
+        # Any other run that dies fast and free is a broken environment, not
+        # progress: two in a row means stop asking.
+        if (end.get("seconds") or 0) < 300 and (end.get("usd") or 0.0) < 0.05:
+            branch["dud_streak"] = branch.get("dud_streak", 0) + 1
+            if branch["dud_streak"] >= 2:
+                branch["status"] = "pending"
+                st["halt"] = (f"{branch['name']}: two runs ended in <5min for <$0.05 "
+                              f"(last: {sr[:120]!r}) — environment problem, not search")
+                return
+        else:
+            branch["dud_streak"] = 0
         if sum(r.get("usd") or 0.0 for r in branch["runs"]) >= BRANCH_USD - 0.05:
             branch["status"] = "done"  # budget-terminated counts as terminated
             branch["capped"] = True
@@ -390,6 +461,10 @@ def main():
                                 best_id=ev.get("best_id"), train=ev.get("train"),
                                 val=ev.get("val"), private=ev.get("private"),
                                 usd=ev.get("usd"))
+                elif _is_live(last["run_id"]):
+                    # still evaluating in the server: leave stop_reason unset so
+                    # run_branch reattaches rather than starting a rival run
+                    log(f"run {last['run_id']} is still live: will reattach")
                 else:
                     led = ROOT / "runs" / last["run_id"] / "ledger.jsonl"
                     if led.exists() and time.time() - led.stat().st_mtime > 7200:
