@@ -153,3 +153,30 @@ run. Actions taken: `submit_export.py` now records nearest-seed identity, cosine
 relative norm, tolerance-used fraction and an equal-margin score estimate in every
 submission's provenance block, and the wiki tracks a second board — best official
 score at feasibility ≤ 0.002 — on which we hold 0.6335 and have not beaten 0.6361.
+
+**2026-07-27 (three fixes from the search audit).** (1) EVAL DEADLINE. The
+in-container `_pool_eval` limit was `eval_timeout * ceil(n/workers) + 15`, which at
+eval_timeout=180 and a 15-boundary batch permits ~24 min — far past the host
+timeout of `cpu_budget + _SLACK`. A batch submitted near the deadline therefore
+killed the whole candidate: -inf, no information, ~12 min of wall clock gone. That
+was 37 of 456 campaign candidates and 30% of all eval wall-clock. The limit is now
+clamped to the wall-clock actually remaining (`cpu_budget + _GRACE(60) - elapsed`),
+so a late batch returns a partial result instead of losing the run.
+(2) MARGIN-DISCOUNTED FITNESS. Train/val fitness is now
+`p2 - 0.92*max(0, feasibility - 0.002)` (`_margin_shape`, tunable via
+`STELLAR_MARGIN`), with `honest_score` computed in-container on every metrics dict
+so candidates can select on it directly, and reported (never subtracted) on the
+private split alongside `tolerance_used`. Rationale in
+memory/stellar_p2/performance-analysis/feasibility-tolerance-economics.md: the
+official rule accepts any violation ≤1% and pays ~0.92 score per unit of it, so raw
+score rewarded walking aspect ratio into the wall — the previous campaign's entire
+margin over the leaderboard bar came from that, not from better structure.
+Validated on the champion program: train fitness 0.62688 → 0.62016 (penalty
+0.006721 for feasibility 0.00931), 193 s, no timeout.
+(3) SEED-BANK BLACKOUT. `STELLAR_NO_BANK=1` empties the bank process-wide, so
+B6-nae-independent actually tests unaided discovery instead of asking writers
+politely not to call `fm.seed_bank(i)`.
+Design follow-on written to `.md/Meta-Optimizer-Design.md`: bi-level loop with
+meta-fitness = hypervolume of the (honest_score, novelty-distance) Pareto front
+under a fixed dollar budget, run on the CHEAP task suite with stellar_p2 held out
+as the transfer test.

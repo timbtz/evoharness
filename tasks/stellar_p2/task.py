@@ -50,6 +50,12 @@ _TRAIN.update(json.loads(os.environ.get("STELLAR_TRAIN_OVERRIDES", "{}")))
 # never "from scratch" — provenance in the JSON, disclosure in NOTICE.md.
 _BANK_FILE = _DIR / "seed_bank.json"
 _BANK = json.loads(_BANK_FILE.read_text())["seeds"] if _BANK_FILE.exists() else []
+# B6-nae-independent asks whether this harness can reach a feasible QI boundary
+# UNAIDED. With the bank importable, a writer can always call fm.seed_bank(i) and
+# quietly defeat the experiment, so the branch must hide it rather than ask
+# nicely: STELLAR_NO_BANK=1 empties it for the whole process (2026-07-27).
+if os.environ.get("STELLAR_NO_BANK") == "1":
+    _BANK = []
 _SLACK = 240.0   # container start + jax import/JIT + the last in-flight eval
 # overshooting the CPU deadline + final re-score — high-mode (11,21) boundaries
 # take 12-27s per forward call, so every tail item is ~20x the mp=1 case
@@ -83,6 +89,17 @@ def _assess(m):
     real = _P2._score(m) if _P2.is_feasible(m) else 0.0
     return feas, real, (real if feas <= 1e-2 else -feas)
 
+def _honest(real, feas):
+    """Score discounted to a low-tolerance margin (audit 2026-07-27). The official
+    rule accepts any violation <= 1%, and P2 rises ~0.92 per unit of feasibility
+    spent, so raw score rewards walking aspect ratio into the wall rather than
+    finding better structure. This is what the search actually optimizes now;
+    `p2_score` stays the raw official number."""
+    if real <= 0:
+        return real
+    return real - CFG.get("margin_slope", 0.92) * max(
+        0.0, feas - CFG.get("margin_target", 0.002))
+
 def _bdict(b):
     return json.loads(b.model_dump_json())
 '''
@@ -99,6 +116,7 @@ def _worker(job):
         return None, str(e)[:300]
     d = {k: v for k, v in m.model_dump().items() if isinstance(v, (int, float))}
     d["feasibility"], d["p2_score"], d["shaped_score"] = _assess(m)
+    d["honest_score"] = _honest(d["p2_score"], d["feasibility"])
     d["fidelity"] = fid or CFG["fidelity"]
     return (d, _bdict(b)), None
 
@@ -112,11 +130,20 @@ import multiprocessing as _mp
 _CTX = _mp.get_context("fork")
 _POOL = _CTX.Pool(CFG["workers"])
 
+_GRACE = 60.0  # container may overrun cpu_budget by this much, no more
+
 def _pool_eval(batch, fidelity=None):
     global _POOL
     limit = CFG["eval_timeout"] * _math.ceil(len(batch) / CFG["workers"]) + 15.0
     if fidelity == "low_fidelity":
         limit *= 2  # tighter force tolerance runs longer
+    # Clamp to the wall-clock actually left. Without this a batch submitted near
+    # the deadline could legally run eval_timeout*ceil(n/workers) seconds (15
+    # boundaries / 2 workers / 180s = 24 min), blowing past the host timeout of
+    # cpu_budget+_SLACK: the candidate is killed, returns -inf, and its whole
+    # slot plus ~12 min of wall clock is lost. 37 of 456 campaign candidates died
+    # exactly this way, 30% of all eval wall-clock (audit 2026-07-27).
+    limit = min(limit, max(CFG["cpu_budget"] + _GRACE - (time.monotonic() - _T0), 5.0))
     try:
         return _POOL.map_async(_worker, [(b, fidelity) for b in batch]).get(limit)
     except _mp.TimeoutError:
@@ -328,6 +355,31 @@ def bank_distance(boundary: dict) -> float | None:
     return best
 
 
+# Feasibility-margin shaping (audit 2026-07-27). The official rule accepts any
+# normalized violation <= 1% and pays ~0.92 score per unit of it, so raw score
+# rewards camping the aspect-ratio wall. Train/val fitness is therefore the score
+# discounted to _MARGIN_TARGET; private stays the raw official truth so the
+# leaderboard number is never distorted. Tune per run without a code change:
+# STELLAR_MARGIN='{"target":0.002,"slope":0.92}'
+_MARGIN = {"target": 0.002, "slope": 0.92}
+_MARGIN.update(json.loads(os.environ.get("STELLAR_MARGIN", "{}")))
+
+
+def _margin_shape(res: EvalResult) -> EvalResult:
+    """Charge the candidate for the feasibility tolerance it spends."""
+    m = res.metrics or {}
+    p2, feas = m.get("p2_score"), m.get("feasibility")
+    if res.error or p2 is None or feas is None or p2 <= 0:
+        return res
+    pen = round(_MARGIN["slope"] * max(0.0, feas - _MARGIN["target"]), 6)
+    m["honest_score"] = round(p2 - pen, 6)
+    m["margin_penalty"] = pen
+    if not pen:
+        return res
+    return EvalResult(res.score - pen, metrics=m, error=res.error,
+                      seconds=res.seconds)
+
+
 def _novelty_shape(res: EvalResult, d: float | None) -> EvalResult:
     """Train/val fitness shaping (novelty decision 2026-07-24): a FEASIBLE
     boundary inside the export guard's 1e-3 ball is a near-copy of a public
@@ -474,11 +526,18 @@ class _StellarP2Task:
             if not res.error:
                 res.metrics["submittable"] = bool(
                     res.score > 0 and (d is None or d >= _NOVELTY_MIN))
+                p2, fe = res.metrics.get("p2_score"), res.metrics.get("feasibility")
+                if p2 and fe is not None:  # reported, never subtracted from truth
+                    res.metrics["honest_score"] = round(
+                        p2 - _MARGIN["slope"] * max(0.0, fe - _MARGIN["target"]), 6)
+                    res.metrics["tolerance_used"] = round(fe / 1e-2, 4)
             return res  # official truth, never shaped
-        return _novelty_shape(res, d)
+        return _margin_shape(_novelty_shape(res, d))
 
     def _train(self, code: str) -> EvalResult:
         cfg = {**_TRAIN, "fidelity": _FIDELITY["train"],
+               "margin_target": _MARGIN["target"],
+               "margin_slope": _MARGIN["slope"],
                "seed_bank": [{"boundary": e["boundary"],
                               "score": e["official_score"],
                               "feasibility": e["official_feasibility"]}
@@ -511,7 +570,7 @@ class _StellarP2Task:
                                    "boundary": boundary}], sha, _FIDELITY["train"])
         except Exception as e:  # archive is bookkeeping: never fail an eval on it
             m["archive_error"] = str(e)[:200]
-        return _novelty_shape(res, d)
+        return _margin_shape(_novelty_shape(res, d))
 
     # -- frontend -------------------------------------------------------
     def render(self, code: str, result: EvalResult) -> dict:

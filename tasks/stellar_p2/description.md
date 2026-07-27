@@ -91,3 +91,18 @@ distance to the nearest same-nfp bank seed — the same metric as the harness
 penalty and the export guard. fm.score() is BLIND to the novelty penalty: your
 acceptance key must combine them yourself, e.g.
 key = score - 0.05 * max(0.0, 1.0 - fm.bank_dist(b) / 1e-3).
+
+FEASIBILITY MARGIN (2026-07-27, changes what "better" means): a design is
+feasible while its worst normalized constraint violation stays <= 0.01, and the
+score rises ~0.92 per unit of that budget you spend — so pushing aspect ratio
+into the wall raises the raw score without improving the physics. An audit of the
+previous campaign found the entire margin over the leaderboard bar came from
+this, not from better structure. Train/val fitness is now the score DISCOUNTED to
+a 0.002 margin:
+    honest = p2_score - 0.92 * max(0.0, feasibility - 0.002)
+Every metrics dict returned by fm.eval/eval_many carries "honest_score" already
+computed — select on it, not on p2_score. The private/official score stays the
+raw number, so a run's headline result is undistorted. Practical consequence:
+squeezing the last 0.001 of aspect-ratio tolerance is now worth roughly nothing,
+and a boundary that reaches the same L at feasibility 0.002 beats one that needs
+0.009. Raise L by structure.
