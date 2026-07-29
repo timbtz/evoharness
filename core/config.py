@@ -7,8 +7,8 @@ from pathlib import Path
 
 SWITCHES: dict[str, tuple[str, ...]] = {
     "feedback": ("score_only", "reflections", "memory"),
-    "gate": ("public_only", "holdout"),
-    "search": ("greedy", "islands", "staged"),
+    "gate": ("public_only", "holdout", "quality_diversity"),
+    "search": ("greedy", "islands", "staged", "bandit_fork"),
     "knowledge": ("off", "wiki_fs", "web"),
     "roles": ("single_strong", "split_roles"),
 }

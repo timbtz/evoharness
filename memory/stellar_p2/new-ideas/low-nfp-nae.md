@@ -8,4 +8,4 @@ Pivoting to a near-axis (NAE) nfp=2 seed to exploit the theoretical scaling L �
 - **Risk:** nfp=2 worsens omnigenity and the QI residual is already thin (log10_qi -4.0025). Whether QI holds is the single empirical question. 
 
 ## Verdict
-promising but untested — This is the only mathematically grounded lever left for a category jump, as the local nfp=3 B3 basin is entirely wiki-saturated.
+promising but barely tested — This is the only mathematically grounded lever left for a category jump. It was probed in `stellar_p2-s100-78100567` c0001 and c0002, but both implementations fundamentally failed to construct the NAE sweep properly. In c0001, the writer botched the `eval_many` batch format; in c0002, the NAE loop was completely dead code (omitted from the `eval_many` batch) and the candidate simply evaluated the shallow contraction grid, scoring train 0.6137. The nfp=2 basin remains genuinely untested.

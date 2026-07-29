@@ -13,10 +13,12 @@ import re
 import time
 from pathlib import Path
 
+from axes.bandit_search import BanditFork
 from axes.feedback import Reflections, ScoreOnly
 from axes.gate import HoldoutGate, PublicOnly
 from axes.knowledge import Off, WikiFS
 from axes.memory import MemoryWiki
+from axes.qd_gate import QualityDiversity
 from axes.research import Researcher
 from axes.roles import SingleStrong, SplitRoles
 from axes.search import Greedy11, Islands, Staged
@@ -47,8 +49,10 @@ SYSTEM = (
 
 _AXES = {
     "feedback": {"score_only": ScoreOnly, "reflections": Reflections, "memory": MemoryWiki},
-    "gate": {"public_only": PublicOnly, "holdout": HoldoutGate},
-    "search": {"greedy": Greedy11, "islands": Islands, "staged": Staged},
+    "gate": {"public_only": PublicOnly, "holdout": HoldoutGate,
+             "quality_diversity": QualityDiversity},
+    "search": {"greedy": Greedy11, "islands": Islands, "staged": Staged,
+               "bandit_fork": BanditFork},
     "knowledge": {"off": Off, "wiki_fs": WikiFS, "web": Researcher},
     "roles": {"single_strong": SingleStrong, "split_roles": SplitRoles},
 }
