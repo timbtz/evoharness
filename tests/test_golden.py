@@ -438,6 +438,58 @@ def test_stellar_archive_dedupe(tmp_path, monkeypatch):
     assert [e["code_sha"] for e in lines] == ["aaa", "ccc"]  # dup + regression dropped
 
 
+# 15a. Soft-fail penalty (Plan 1): graded, monotone in the force residual, and
+# STRICTLY dominated by every converged shaped score (reward-hack guard — a
+# candidate that only "improves" residuals of unconverged solves never outranks
+# one converged eval).
+def test_stellar_soft_fail_dominance():
+    from tasks.stellar_p2 import task as st
+    ftol = 1e-9
+    resids = [1e-9, 1e-7, 1e-4, 1e-1, 1e2, 1e6]
+    pens = [st._soft_penalty(r, 0.0, 0.0, ftol) for r in resids]
+    assert all(a > b for a, b in zip(pens, pens[1:])), pens  # closer => higher
+    assert all(-1001.0 <= p <= -1000.0 for p in pens), pens
+    worst_converged = -999.0  # shaped = -feasibility; observed |feas| is O(1)
+    assert max(pens) < worst_converged
+    # the graded channel is train-only: the clean-room verify template and the
+    # final authoritative re-score never see the patch
+    assert "_soft_penalty" not in st._VERIFY and "restart_from" not in st._VERIFY
+
+
+# 15b. Kill-switches restore the pre-Plan-1 solve path: with both env flags off
+# the in-container patch never replaces run_vmec, and the cfg the host ships
+# reflects the env at call time (no reimport needed).
+def test_stellar_hot_restart_killswitch(monkeypatch):
+    import ast
+
+    from core.sandbox import SandboxResult
+    from tasks.stellar_p2 import task as st
+    seen = {}
+
+    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1):
+        seen["script"] = script
+        return SandboxResult("", "", 1, 0.1, False)
+
+    def shipped_cfg():
+        raw = seen["script"].split("json.loads(")[1] \
+                            .split(")  # JSON string literal")[0]
+        return json.loads(ast.literal_eval(raw))
+
+    monkeypatch.setattr(st, "_runner", fake_runner)
+    monkeypatch.setenv("STELLAR_HOT_RESTART", "0")
+    monkeypatch.setenv("STELLAR_SOFT_FAIL", "0")
+    st.TASK._train("def solve(fm, rng):\n    return None\n")
+    cfg = shipped_cfg()
+    assert cfg["hot_restart"] is False and cfg["soft_fail"] is False
+    monkeypatch.setenv("STELLAR_HOT_RESTART", "1")
+    monkeypatch.setenv("STELLAR_SOFT_FAIL", "1")
+    st.TASK._train("def solve(fm, rng):\n    return None\n")
+    cfg = shipped_cfg()
+    assert cfg["hot_restart"] is True and cfg["soft_fail"] is True
+    # gate in the template: patch installs only when a flag is on
+    assert "if _HR_ON or _SF_ON:\n    _vu.run_vmec = _run_vmec" in st._TEMPLATE
+
+
 # 15. Gate tie-band (§6.3): a val-tie with a train regression is rejected.
 def test_gate_val_tie_rejects_train_regression():
     from axes.gate import HoldoutGate

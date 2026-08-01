@@ -10,10 +10,19 @@ of metered physics-simulator calls and returns the best boundary it found.
 
 The fm handle (your only access to physics; every eval costs ~1.5 s CPU):
 - fm.eval(boundary_dict) -> dict of metrics, or None on failure with the reason
-  in fm.last_error (VMEC non-convergence etc. — informative, not fatal).
+  in fm.last_error (solver crash etc. — informative, not fatal).
   Budget: 72 evals AND a 240 s CPU deadline, whichever hits first. A single
   eval is hard-killed after 60 s (pathological boundaries can hang the
   solver) — it still costs a budget unit and returns None.
+  A solve that runs but does NOT converge returns a dict with
+  "soft_fail": True and a graded sentinel score in [-1001, -1000] (higher =
+  closer to convergence; residuals in "fsqr"/"fsqz"/"fsql"). It is strictly
+  worse than every converged result — never keep such a boundary, but the
+  gradient across soft-fails tells you which direction is closer to solvable.
+- Evals of boundaries within 1e-3 (max coefficient) of a recently converged
+  one skip the solver's coarse init stage and run ~25-45% faster (identical
+  metrics) — small-step local search literally buys more evals per second
+  than blind jumps.
 - fm.eval_many([b1, b2, ...]) -> list of metrics/None, same order. Runs on 2
   parallel workers: a batch of 2+ costs ~half the wall-clock of sequential
   fm.eval calls but the SAME budget units — batch/population strategies fit

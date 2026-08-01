@@ -184,3 +184,34 @@ as the transfer test.
 - Novelty ramp is env-tunable (`STELLAR_NOVELTY`, default unchanged) and campaign 2 widens it 1e-3 → 3e-3: max-coefficient distance is a weak novelty test (the champion cleared the 1e-3 export ball at 2.6e-3 while being the same shape rescaled), so the old ramp switched off exactly where near-copies live. The export guard's hard 1e-3 refusal is untouched — this shapes train/val only — and `submittable` reports against the guard's bar, not the ramp's. Every metrics dict now carries `bank_cos`, the nearest-seed cosine that the distance hides.
 - The eval-deadline clamp shipped 2026-07-27 had to be split by call site: it measured every batch against `cpu_budget + 60`, but the mandatory final re-score by construction starts AFTER the search has spent cpu_budget, so it was floored at 5s and -inf'd every candidate that used its full budget (campaign 2's first candidate, 556.6s against a 540s ceiling). Search batches keep that ceiling; the re-score clamps to the container's own deadline (`cpu_budget + slack - 45s`) with a 30s floor. Lesson recorded because the original validation passed only by running a program that finished in 193s and never reached the deadline.
 - The DAG driver is now restart-safe: `run_branch` reattaches to a live run instead of launching a rival (two stellar runs on 4 vCPUs is the documented way to make every eval time out), a 429/1113 or two consecutive sub-5-minute sub-$0.05 runs halt the campaign instead of spinning, `wait_for` declares a run dead after 2h of ledger silence rather than sitting on it for 20h, and `resume_from` skips runs that never produced a candidate (which would 422 the launch and crash the driver).
+
+**2026-07-30 (Plan 1: hot restart + graded soft-fail in the train loop).** The
+train template now monkey-patches the pinned dependency (constellaration 0.2.6,
+`mhd/vmec_utils.run_vmec`, vmecpp 0.4.11) inside the eval container — the only
+patch to a pinned evaluator so far, hence this entry. Two changes, train-only:
+(1) WARM EVALS: when a same-grid converged parent is within max-coeff 1e-3
+(`STELLAR_HOT_RESTART_TOL`; LRU of 4/worker, template-owned — candidates cannot
+inject states) the child solves with a single multigrid stage at the final ns
+(=71 for the vlf preset), skipping the preset's ns=25 stage — which burns a
+fixed 2000 iterations against an unreachable ftol=1e-17 and, measured on
+archive parent/child pairs, contributes NOTHING to the final state (bit-
+identical metrics with and without it). True hot restart
+(`vmecpp.run(..., restart_from=parent)`, `STELLAR_HOT_RESTART_MODE=restart`)
+was implemented first and REJECTED as the default: at vlf's loose ftol=1e-9 it
+deterministically converges to a *different* equilibrium (iota-axis drift up to
+~2.3%, min L-gradB up to 30% => p2 drift up to 0.19) and is sometimes slower
+than cold — it fails the plan's own metric-agreement acceptance. Warm failure
+of any kind falls back to the cold path. (2) SOFT FAIL: `return_outputs_even_if_
+not_converged=True` plus a final-stage niter cap of 5000 (`STELLAR_SOFT_FAIL_
+NITER`) so non-convergence surfaces INSIDE the 60s eval kill as a graded
+sentinel in [-1001, -1000] (higher = closer to convergence, log10 of summed
+force residuals; `_soft_penalty` in task.py) instead of an information-free
+None/pool-kill. The cap only binds where the old path timed out anyway (worst
+healthy vlf eval ~27s ≈ 3000 iters; 20000 iters ≈ 200s >> the 60s kill). VMEC
+"fatal in first iterations" failures (the majority of cliff deaths, verified
+in-image) still return None — the flag cannot catch those. Anti-forging
+unchanged: the clean-room _VERIFY template contains none of this, and the final
+authoritative re-score runs strict (cold, hard-fail, full niter). Kill-switches
+`STELLAR_HOT_RESTART=0` / `STELLAR_SOFT_FAIL=0` (read per eval call) leave
+run_vmec unpatched. Golden tests: soft-fail dominance + monotonicity, kill-
+switch cfg plumbing. Empirical validation in experiments/hot_restart_bench.py.

@@ -104,20 +104,150 @@ def _bdict(b):
     return json.loads(b.model_dump_json())
 '''
 
+# ---- soft-fail grading, shared host/template (Plan 1, 2026-07-30) ----------
+# exec'd host-side too so golden tests assert the exact in-container rule
+_SOFT_SRC = '''
+_SF_FLOOR = -1000.0  # every converged shaped score (= -feasibility, |feas| ~ O(1)
+# in all 50k observed evals) strictly dominates every soft-fail sentinel
+def _soft_penalty(fsqr, fsqz, fsql, ftol):
+    """Graded fitness for a non-converged solve, in [-1001, -1000]: higher =
+    closer to convergence (log10 of summed force residuals vs requested ftol)."""
+    import math
+    resid = max(float(fsqr) + float(fsqz) + float(fsql), 1e-300)
+    g = min(max((math.log10(resid) - math.log10(float(ftol))) / 12.0, 0.0), 1.0)
+    return _SF_FLOOR - g
+'''
+exec(_SOFT_SRC)  # noqa: S102 — defines _soft_penalty for the golden tests
+
+# ---- eval-efficiency patch (Plan 1): hot restart + graded soft-fail --------
+# Train-loop only: _VERIFY (val/public/private) never contains this block and
+# the final authoritative re-score runs strict (pure cold semantics), so the
+# anti-forging boundary is untouched. The restart cache is template-owned and
+# per pool worker; candidate code cannot reach or seed it.
+# Kill-switches: STELLAR_HOT_RESTART=0 / STELLAR_SOFT_FAIL=0 (host env) — with
+# both off, run_vmec is never patched and the old path is restored.
+_HOTPATCH = _SOFT_SRC + '''
+import vmecpp as _vmecpp
+from constellaration.mhd import vmec_utils as _vu
+
+_HR_ON = bool(CFG.get("hot_restart"))
+_SF_ON = bool(CFG.get("soft_fail"))
+_HR_TOL = float(CFG.get("hot_restart_tol", 1e-3))
+# "single_stage": near-parent children skip the vlf preset's ns=25 stage (a
+# fixed ~2000 wasted iterations: ftol 1e-17 is unreachable) and solve cold at
+# ns=71 — measured bit-identical metrics to the multigrid path. "restart"
+# additionally passes restart_from=<parent> (true hot restart): measured to
+# converge to a DIFFERENT equilibrium at vlf's loose ftol (iota0 up to ~2%,
+# min L-gradB up to 30% => p2 drift up to 0.19) — kept only for experiments.
+_HR_MODE = str(CFG.get("hot_restart_mode", "single_stage"))
+_SF_NITER = int(CFG.get("soft_fail_niter", 5000))
+_HR_CACHE = []   # per pool worker: (nfp, r_cos, z_sin, VmecOutput), newest last
+_STRICT = False  # set by _worker for the final re-score: cold, hard-fail
+
+class _SoftFail(Exception):
+    def __init__(self, w, ftol):
+        self.info = {"fsqr": w.fsqr, "fsqz": w.fsqz, "fsql": w.fsql,
+                     "ftol": ftol, "niter": int(w.niter)}
+        super().__init__("VMEC not converged after %d iters: fsqr=%.1e fsqz=%.1e"
+                         " fsql=%.1e (ftol %.0e)"
+                         % (w.niter, w.fsqr, w.fsqz, w.fsql, ftol))
+
+def _hr_parent(nfp, rc, zs, indata):
+    """Closest cached converged parent on an IDENTICAL grid within _HR_TOL
+    (vlf resolution follows the boundary's nonzero modes, so grids can differ
+    between parent and child; restart is only well-posed on the same grid)."""
+    best = None
+    for pnfp, prc, pzs, pout in _HR_CACHE:
+        pin = pout.input
+        if (pnfp != nfp or prc.shape != rc.shape or pin.mpol != indata.mpol
+                or pin.ntor != indata.ntor or pin.ntheta != indata.ntheta
+                or pin.nzeta != indata.nzeta
+                or pin.ftol_array[-1] != indata.ftol_array[-1]):  # same fidelity
+            continue
+        d = max(np.abs(prc - rc).max(), np.abs(pzs - zs).max())
+        if d <= _HR_TOL and (best is None or d < best[0]):
+            best = (d, pout)
+    return best[1] if best else None
+
+def _run_vmec(boundary, mhd_parameters, vmec_settings):
+    """Drop-in for vmec_utils.run_vmec: when a cached converged parent is close
+    enough, solve the child in a single multigrid stage at the final ns
+    (default mode skips the wasted ns=25 stage; "restart" mode also passes the
+    parent state), and grade non-convergence instead of erasing it."""
+    indata = _vu.build_vmecpp_indata(mhd_parameters=mhd_parameters,
+                                     boundary=boundary,
+                                     vmec_settings=vmec_settings)
+    if _SF_ON and not _STRICT:
+        # Surface non-convergence as data, and cap the final stage so it
+        # surfaces INSIDE the 60s eval kill (vlf's niter=20000 would take
+        # ~200s: today those evals die as information-free pool kills).
+        # The cap only binds where the old path timed out anyway: worst
+        # healthy eval observed is ~27s ~ 3000 iters.
+        indata.return_outputs_even_if_not_converged = True
+        indata.niter_array = indata.niter_array.copy()
+        indata.niter_array[-1] = min(indata.niter_array[-1], _SF_NITER)
+    rc = np.asarray(boundary.r_cos, float)
+    zs = np.asarray(boundary.z_sin, float)
+    nfp = int(boundary.n_field_periods)
+    out, warm = None, False
+    parent = None if (_STRICT or not _HR_ON) else _hr_parent(nfp, rc, zs, indata)
+    if parent is not None:
+        wi = indata.model_copy(deep=True)
+        wi.return_outputs_even_if_not_converged = False  # warm miss -> cold retry
+        wi.ns_array, wi.ftol_array, wi.niter_array = (
+            wi.ns_array[-1:], wi.ftol_array[-1:], wi.niter_array[-1:])
+        try:
+            out = _vmecpp.run(wi, verbose=vmec_settings.verbose,
+                              max_threads=vmec_settings.max_threads,
+                              restart_from=(parent if _HR_MODE == "restart"
+                                            else None))
+            warm = True
+        except Exception:
+            out = None                                   # fall back to cold
+    if out is None:
+        out = _vmecpp.run(indata, verbose=vmec_settings.verbose,
+                          max_threads=vmec_settings.max_threads)
+    _run_vmec.last_warm = warm
+    w = out.wout
+    ftol = float(indata.ftol_array[-1])
+    if max(w.fsqr, w.fsqz, w.fsql) > ftol:  # reachable only with _SF_ON
+        raise _SoftFail(w, ftol)
+    if _HR_ON and not _STRICT:
+        _HR_CACHE.append((nfp, rc, zs, out))
+        del _HR_CACHE[:-4]                  # keep the last 4 converged parents
+    return _vu.vmecppwout_from_wout(w)
+
+_run_vmec.last_warm = False
+if _HR_ON or _SF_ON:
+    _vu.run_vmec = _run_vmec  # forward_model resolves it via the module attr
+'''
+
 # ---- optimizer-run template: candidate code + metered fm handle ------------
-_TEMPLATE = _PRELUDE + '''
+_TEMPLATE = _PRELUDE + _HOTPATCH + '''
 def _worker(job):
-    """One forward eval in a pool worker; never raises. job = (boundary, fid)."""
-    boundary, fid = job
+    """One forward eval in a pool worker; never raises.
+    job = (boundary, fid, strict) — strict is the final authoritative re-score:
+    cold solve, hard failure, exactly the pre-Plan-1 semantics."""
+    boundary, fid, strict = job
+    global _STRICT
+    _STRICT = strict
+    _t0 = time.monotonic()
     try:
         b = _srf.SurfaceRZFourier.model_validate(boundary)
         m, _ = _fmod.forward_model(b, settings=_settings(fid))
+    except _SoftFail as e:
+        return None, e.info               # graded channel: dict, not message
     except Exception as e:
         return None, str(e)[:300]
+    finally:
+        _STRICT = False
     d = {k: v for k, v in m.model_dump().items() if isinstance(v, (int, float))}
     d["feasibility"], d["p2_score"], d["shaped_score"] = _assess(m)
     d["honest_score"] = _honest(d["p2_score"], d["feasibility"])
     d["fidelity"] = fid or CFG["fidelity"]
+    if _HR_ON or _SF_ON:
+        d["warm_start"] = _run_vmec.last_warm
+        d["eval_seconds"] = round(time.monotonic() - _t0, 2)
     return (d, _bdict(b)), None
 
 # ALL evals run in pool workers, forked BEFORE any jax op (fork-after-XLA-init
@@ -154,7 +284,8 @@ def _pool_eval(batch, fidelity=None, final=False):
     deadline = _HARD if final else CFG["cpu_budget"] + _GRACE
     limit = min(limit, max(deadline - (time.monotonic() - _T0), 30.0 if final else 5.0))
     try:
-        return _POOL.map_async(_worker, [(b, fidelity) for b in batch]).get(limit)
+        return _POOL.map_async(_worker,
+                               [(b, fidelity, final) for b in batch]).get(limit)
     except _mp.TimeoutError:
         _POOL.terminate()
         _POOL.join()
@@ -168,6 +299,7 @@ class _FM:
     candidate code; every attempted boundary costs one budget unit."""
     def __init__(self):
         self.used, self.last_error = 0, None
+        self.warmed, self.soft = 0, 0   # hot-restart / soft-fail eval counters
     def remaining(self):
         return CFG["max_evals"] - self.used
     def eval_many(self, boundaries, fidelity=None):
@@ -187,11 +319,24 @@ class _FM:
         results = _pool_eval(batch, fidelity)
         out = []
         for ok, err in results:
-            if ok is None:
+            if ok is None and isinstance(err, dict):
+                # non-converged solve: graded sentinel strictly below every
+                # converged score (never enters _LOG/archive; train-only signal)
+                self.soft += 1
+                self.last_error = ("VMEC not converged (fsqr=%.1e fsqz=%.1e "
+                                   "fsql=%.1e)" % (err["fsqr"], err["fsqz"],
+                                                   err["fsql"]))
+                s = _soft_penalty(err["fsqr"], err["fsqz"], err["fsql"], err["ftol"])
+                out.append({"soft_fail": True, "shaped_score": s,
+                            "honest_score": s, "p2_score": 0.0,
+                            "feasibility": float("inf"),
+                            "fidelity": fidelity or CFG["fidelity"], **err})
+            elif ok is None:
                 self.last_error = err
                 out.append(None)
             else:
                 d, bd = ok
+                self.warmed += int(bool(d.get("warm_start")))
                 _LOG.append((d["shaped_score"], d["p2_score"], d["feasibility"], bd))
                 out.append(d)
         out += [None] * (len(boundaries) - len(batch))
@@ -212,6 +357,13 @@ class _FM:
                  "official_feasibility": e["feasibility"]}
                 for i, e in enumerate(CFG["seed_bank"])]
     def seed_bank(self, i):
+        # An empty bank means STELLAR_NO_BANK=1: this run is the unaided-discovery
+        # test. Say so loudly — a bare IndexError just costs the writer a candidate.
+        if not CFG["seed_bank"]:
+            raise RuntimeError(
+                "seed bank is DISABLED for this run (independent-basin test): "
+                "no public submissions are available. Build the boundary from "
+                "fm.seed_nae(...) / fm.seed_ellipse(...) only.")
         return json.loads(json.dumps(CFG["seed_bank"][int(i)]["boundary"]))
     def bank_dist(self, boundary):
         """Max-coefficient distance to the closest same-nfp bank seed (padded
@@ -278,6 +430,8 @@ try:
         "edge_mirror_ratio": _md.get("edge_magnetic_mirror_ratio"),
         "log10_qi": float(np.log10(_md["qi"])) if _md.get("qi") else None,
         "evals_used": _fm.used, "seconds_used": round(time.monotonic() - _T0, 1),
+        **({"evals_warm": _fm.warmed, "evals_soft": _fm.soft}
+           if _HR_ON or _SF_ON else {}),
         "boundary": _bd, "archive": _arch}}))
 except Exception as e:
     _tb = traceback.extract_tb(e.__traceback__)
@@ -572,6 +726,17 @@ class _StellarP2Task:
                "margin_target": _MARGIN["target"],
                "margin_slope": _MARGIN["slope"],
                "slack": _SLACK,   # container's own deadline = cpu_budget + this
+               # Plan 1 eval-efficiency knobs (read per call so kill-switches
+               # work without a reimport): STELLAR_HOT_RESTART=0 / _SOFT_FAIL=0
+               # restore the pre-patch solve path byte-identically
+               "hot_restart": os.environ.get("STELLAR_HOT_RESTART", "1") != "0",
+               "soft_fail": os.environ.get("STELLAR_SOFT_FAIL", "1") != "0",
+               "hot_restart_mode": os.environ.get(
+                   "STELLAR_HOT_RESTART_MODE", "single_stage"),
+               "hot_restart_tol": float(os.environ.get(
+                   "STELLAR_HOT_RESTART_TOL", "1e-3")),
+               "soft_fail_niter": int(os.environ.get(
+                   "STELLAR_SOFT_FAIL_NITER", "5000")),
 
                "seed_bank": [{"boundary": e["boundary"],
                               "score": e["official_score"],
