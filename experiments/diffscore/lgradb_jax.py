@@ -8,6 +8,7 @@ _score with _normalize_between_bounds(0, 20), forward_model.py:174-181).
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.special as jsp
 import numpy as np
 
 jax.config.update("jax_enable_x64", True)
@@ -30,9 +31,24 @@ def _at_boundary_half(x):
 
 def min_normalized_l_grad_b(rmnc, zmns, gmnc, bmnc, bsupumnc, bsupvmnc,
                             xm, xn, xm_nyq, xn_nyq, ns: int, aminor_p,
-                            mpol: int, ntor: int, nfp: int, lasym: bool):
+                            mpol: int, ntor: int, nfp: int, lasym: bool,
+                            smoothing: float = 0.0):
     """min over the Nyquist theta-phi grid of L_gradB / Aminor_p, times nfp
-    (i.e. metrics.minimum_normalized_magnetic_gradient_scale_length)."""
+    (i.e. metrics.minimum_normalized_magnetic_gradient_scale_length).
+
+    `smoothing` (tau, in the units of the returned metric) replaces the hard min
+    with a softmin, -tau*logsumexp(-x/tau). tau=0.0 is the exact reference path
+    and stays the default, so every parity test is unaffected.
+
+    Why this knob exists (measured 2026-08-05, version_drift.py): the argmin of
+    this field SWITCHES under 1e-4 max-coefficient boundary steps, i.e. the
+    objective is only piecewise smooth at the step sizes where VMEC re-converges.
+    The consequence is not academic — a finite difference of the hard min and its
+    own a.e. gradient disagree IN SIGN on the same solver (+773 vs -2069 on a
+    feasible boundary at h=3e-4). Any gradient method on this objective needs the
+    min softened enough to span a branch switch, and small enough that the
+    smoothed optimum still tracks the true one — the same trade qi_jax's
+    `smoothing` makes. See experiments/softmin_study.py for the tau sweep."""
     n_theta = 2 * mpol + 6
     n_phi = 2 * ntor + 4
     phi_ub = 2.0 * np.pi / nfp / (1 + int(not lasym))
@@ -149,7 +165,11 @@ def min_normalized_l_grad_b(rmnc, zmns, gmnc, bmnc, bsupumnc, bsupvmnc,
             gg = gg + (dds * gX[0] + ddt * gX[1] + ddp * gX[2]) ** 2
 
     l_grad_b = B * jnp.sqrt(2.0 / gg)
-    return jnp.min(l_grad_b / aminor_p) * nfp
+    x = (l_grad_b / aminor_p) * nfp
+    if not smoothing:
+        return jnp.min(x)
+    tau = float(smoothing)
+    return -tau * jsp.logsumexp(-x.ravel() / tau)
 
 
 def p2_score(min_l_grad_b_normalized):

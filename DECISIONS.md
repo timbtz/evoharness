@@ -344,3 +344,19 @@ differences of the objective are the wrong estimator — contract the analytic
 d(L)/d(wout) from lgradb_jax against finite differences of the WOUT ARRAYS,
 which are smooth in the boundary. That estimator is step-size converged (1% and
 5% between step sizes) where the naive one is not.
+
+**2026-08-05c (the objective's non-smoothness is a step-size problem, not a
+smoothing problem).** Follow-up to 2026-08-05b. `lgradb_jax.min_normalized_l_grad_b`
+gained `smoothing=tau` (softmin via logsumexp; tau=0 is the exact default, so no
+parity test moves), and `experiments/softmin_study.py` sweeps it on stencils
+already on disk — no new solves. Asking for a usable gradient (analytic agrees
+with the secant over the same step) AND an honest value (P2 = L/20, so 0.02 in L
+is 0.001 in score) at the same time: at h=1e-4 there is NO such tau — agreement
+arrives only at tau~0.3 (2.5% of the objective) which biases the score by 0.043,
+ten times the honest gap. At h=1e-5 the HARD min is already fine: sign agreement
+3/3, analytic-vs-secant 2.2%. So the objective is smooth at 1e-5 and
+branch-switching at 1e-4, and the plan's 1e-4..1e-2 trust region is the wrong
+regime by 1-3 orders of magnitude. Smoothing cannot substitute for small steps.
+Consequence for Plan 3, cutting both ways: the plan's cost model ("42-attempt
+gradient-free polish is starved") overestimates progress per step, but the case
+for an O(1) adjoint gets STRONGER, because 1e-5 steps mean many more gradients.
