@@ -305,3 +305,42 @@ is missing: open PR #581, or FD force-columns. The plan's #591/#592/#609 do not
 exist. The pinned evaluator stays `constellaration 0.2.6` -> `vmecpp==0.4.11`
 (hard pin, verified on PyPI — an image rebuild is reproducible), and the sidecar
 version drift 0.4.11 vs 0.7.1 remains unmeasured.
+
+**2026-08-05b (Plan-3 pre-flight measured: the sidecar architecture fails, and
+the objective is non-smooth).** Executed pre-flight items 2-4 rather than
+assuming them (`experiments/version_drift.py`; full report in
+`Demo 2/.md/handoffs/Plan-3-Preflight-Report.md`). Method: dump the exact
+VmecInput constellaration builds at vlf to JSON in the pinned image, solve the
+SAME json with vmecpp 0.7.1 in a separate venv (the two cannot coexist —
+constellaration 0.2.6 hard-pins vmecpp==0.4.11), then apply the SAME metric code
+(Plan-2's JAX ports) to both array sets, so the solver version is the only
+variable. Three results, in increasing order of importance:
+(1) DRIFT: over 10 stratified boundaries, aspect is bit-identical (it never
+touches the solver — consistent with Plan 2 proving it boundary-only), edge iota
+drifts 4.6e-4 median, elongation 1.6e-4, mirror 4.2e-5, but **min L-gradB drifts
+0.126 median / 0.194 max => P2 SCORE 0.0063 median / 0.0097 max**. Our whole
+honest gap is ~0.004, so a 0.7.1 sidecar's bias exceeds the prize: it cannot
+adjudicate "is this boundary better".
+(2) DIRECTION: a constant offset would be survivable under "sidecar proposes,
+pinned disposes", so the directional derivative of the objective was compared
+head to head. **Sign agreement 1 of 3** (pinned -2182 vs sidecar +156; -1477 vs
+-204; +5016 vs -1273), stable across two step sizes. A 0.7.1 gradient does not
+descend the 0.4.11 objective. The sidecar architecture Plan 3 specifies is dead
+unless the adjoint is built against the PINNED solver — and 0.4.11 has no
+VmecModel at all (it first appears in 0.6.1), so the merged HVP machinery is
+unreachable from the pinned version. That fork did not exist in the plan.
+(3) WHY, and this is the bigger finding: the P2 objective is a MIN over a
+Nyquist theta-phi grid, and **the argmin switches under 1e-4 max-coefficient
+boundary steps on both solvers** (measured per-stencil; the sidecar's feasible
+base sits on argmin (0,5) while the pinned base sits on (21,13)). Consequences
+measured, not inferred: FD of the objective is not step-size converged (pinned
+dL moved 1.5-5x between h=1e-4 and 3e-4) and disagrees IN SIGN with the a.e.
+gradient for the same solver (+773 vs -2069). Plan 2 established that the qi
+CONSTRAINT is non-smooth; the OBJECTIVE is non-smooth the same way, which no
+plan anticipated. A soft-min L-gradB (logsumexp, with the tau-convergence study
+qi_jax already has) is therefore a prerequisite for any gradient method here,
+not a refinement. Methodological note for anyone repeating this: finite
+differences of the objective are the wrong estimator — contract the analytic
+d(L)/d(wout) from lgradb_jax against finite differences of the WOUT ARRAYS,
+which are smooth in the boundary. That estimator is step-size converged (1% and
+5% between step sizes) where the naive one is not.
