@@ -41,15 +41,18 @@ Second, honesty-preserving leaderboard to track from now on: **best official sco
 - m-transfer.md — Post-composition low-m to high-m zero-sum curvature transfer yields no gain over the optimal two-stage composition.
 - m-dependent-cr-cz-ratio.md — Making the cr/cz decoupling ratio a function of poloidal mode `m` destroys global aspect coordination.
 - b6-nae-independent-pivot.md — Parameterized nfp=3 NAE seed sweeps lack baseline L and collapse to the incumbent.
+- warm-ladder-and-soft-fail-cliff-walking.md — Merged into surrogate-and-nae-escapes.md.
+- plan1-deep-s5-85591679.md — Isolated state traps: recombination, per-row grafting, acceptance-key tweaks, warm-ladder depth sweeps, interleaved dual-seed ladders, chained multi-parameter ladders, adaptive coordinate walkers, 3D grids, and global scaling on dynamic bank seeds fail to recover baseline L (capped at 0.6158).
 - stellar_p2-s100-78100567.md — Float typo regressions, failed NAE pivots (nfp=2/4), uncontraction, mode grafting, and n-axis perturbations fail.
 - stellar_p2-s203-38950787.md — R/Z-split depth, NAE pivots, and blends regress to typo floor.
 - stellar_p2-s201-47725970.md — Typo floor regressions, nfp=4/NAE basin collapses, and saturated stage-1 `(b1, c1)` interior micro-sweeps fail.
 - stellar_p2-s202-55112695.md — Silent typos, exhausted stage-1/2 grids, dynamic bank seed drops, and an nfp=2 NAE timeout trap the run.
 - stellar_p2-s204-63425638.md — Dynamic bank seed contraction, NAE nfp=2 pivots, coordinate ascent, adaptive stochastic ascent, m=0 phase shifts, BDC scaling, and hardcoded approximations cap the isolated run at 0.5835.
 - stellar_p2-s205-85293087.md — Isolated state traps, fabricated low-mode boundary matrices, bank seed contraction caps, axisymmetric perturbations, spectral frequency-reweighting, and nfp=2→3 rescaling fail to recover baseline L, capping run at 0.5783.
-- stellar_p2-s206-7450085.md — Isolated state traps without hardcoded matrix: spectral shifts, n-axis tapering, blends, multi-seed portfolios, hardcoded (8,7) approximations, shear, and rotation all cap the run at 0.581.
+- stellar_p2-s206-7458085.md — Isolated state traps without hardcoded matrix: spectral shifts, n-axis tapering, blends, multi-seed portfolios, hardcoded (8,7) approximations, shear, and rotation all cap the run at 0.581.
 - stellar_p2-s207-18745292.md — Independent basins from NAE/ellipse seeds lack baseline objective_L and fail to achieve feasibility (capped at -0.83 score).
 - independent-basin-violation-descent.md — Structural contraction, coordinate-axis, SPSA, forward-probe, and physics-first constraint-targeted transforms on NAE seeds strictly increase constraint violations, failing to bridge the gap to feasibility.
+- plan1-deep-s7-85609652.md — Iterative walkers, nfp=2 NAE probes, multi-anchor portfolios, fidelity-gated grids, warm-ladders, and structural interpolations trap the isolated run at 0.6160, capped by missing baseline objective_L.
 
 ## performance-analysis
 - feasibility-tolerance-economics.md — the official rule (`_DEFAULT_RELATIVE_TOLERANCE = 0.01`, max of 5 normalized violations, aspect ratio always binding) and the ~0.92 score-per-feasibility exchange rate.
@@ -66,51 +69,47 @@ Second, honesty-preserving leaderboard to track from now on: **best official sco
 - none-metric-crash-bug.md — Always None-guard NAE/bank metrics before arithmetic in `_accept_key` to prevent `TypeError` crashes.
 - index-based-symmetry-zeroing-bug.md — Always use a boolean zero-pattern mask, not hardcoded column indices, to enforce stellarator symmetry dynamically.
 - violation-first-selection.md — In isolated states without the public seed bank, select independent NAE/ellipse candidates strictly by minimizing maximum constraint violation.
+- honest-score-api-bug.md — Avoid passing extra positional args to helper functions extracting Pydantic metrics (e.g., `m.get("honest_score")`) to prevent `TypeError` crashes.
 
 ## new-ideas
+- graded-soft-fail-and-warm-evals.md — NEW EVAL CONTRACT (2026-08-01): non-converged solves return graded scores (bisect into the cliff, don't retreat); ≤1e-3 same-grid ladder steps are ~25% cheaper (structure searches as ladders, not portfolios). Untested as deliberate strategy.
 - low-nfp-nae.md — Pivoting to an nfp=2 NAE seed to exploit the L ∝ A/Nfp scaling law for a category jump in score.
-- untested-ascent-mechanisms.md — Absorbed analyst rounds (SPSA, DFO); mostly refuted/tried.
-- analyst-stellar_p2-s105-26196944-2.md — Decision log @ 24 cands.
-- analyst-stellar_p2-s105-72881323-*.md — Historical decision logs (3, 4, 5, 6, 8).
-- analyst-stellar_p2-s105-26196944-3.md — in-run Opus analysis + decision log @ 36 cands.
-- analyst-stellar_p2-s105-26196944-4.md — in-run Opus analysis + decision log @ 48 cands.
-- analyst-stellar_p2-s105-26196944-5.md — in-run analysis + decision log @ 60 cands.
-- analyst-stellar_p2-s100-78100567-*.md — Historical decision logs for s100 (1 through 6).
-- analyst-stellar_p2-s203-38950787-*.md — Historical decision logs (1, 2).
-- analyst-stellar_p2-s201-47725970-*.md — Historical decision logs (1, 2).
-- analyst-stellar_p2-s202-55112695-*.md — Historical decision logs (1, 2).
-- analyst-stellar_p2-s204-63425638-*.md — Historical decision logs (1, 2, 3).
-- analyst-stellar_p2-s205-85293087-*.md — Historical decision logs (1, 2, 3).
-- analyst-stellar_p2-s206-7450085-1.md — in-run analysis + decision log @ 12 cands (stellar_p2-s206-7450085).
-- analyst-stellar_p2-s207-18745292-1.md — in-run analysis + decision log @ 12 cands (stellar_p2-s207-18745292).
+- analyst-stellar_p2-s100-78100567-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s100-78100567-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s100-78100567-3.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s100-78100567-4.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s100-78100567-5.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s100-78100567-6.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-26196944-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-26196944-3.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-26196944-4.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-26196944-5.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-72881323-3.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-72881323-4.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-72881323-5.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-72881323-6.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s105-72881323-8.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s201-47725970-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s201-47725970-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s202-55112695-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s202-55112695-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s203-38950787-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s203-38950787-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s204-63425638-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s204-63425638-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s204-63425638-3.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s205-85293087-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s205-85293087-2.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s205-85293087-3.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s206-7450085-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s207-18745292-1.md — (restored by index guard: dropped in last review)
+- analyst-stellar_p2-s207-18745292-2.md — (restored by index guard: dropped in last review)
 
 ## Open directions
 1. **The contraction ladder is done as a scoring strategy.** It has ~0.0007 of tolerance left.
 2. **The only directions that still matter raise L at LOW feasibility**: a genuinely different basin (nfp=2 NAE) or a global structural transform.
 3. **Run B6-nae-independent.** It is the only branch that tests whether this harness can reach a feasible QI boundary without a public seed.
 4. TRUST val→official within a lineage: private 0.6400 > val 0.6380 > train 0.6269.
-- new-ideas/analyst-stellar_p2-s100-78100567-1.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s100-78100567-2.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s100-78100567-3.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s100-78100567-4.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s100-78100567-5.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s100-78100567-6.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s105-72881323-3.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s105-72881323-4.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s105-72881323-5.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s105-72881323-6.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s105-72881323-8.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s201-47725970-1.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s201-47725970-2.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s202-55112695-1.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s202-55112695-2.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s203-38950787-1.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s203-38950787-2.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s204-63425638-1.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s204-63425638-2.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s204-63425638-3.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s205-85293087-1.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s205-85293087-2.md — (restored by index guard: dropped in last review)
-- new-ideas/analyst-stellar_p2-s205-85293087-3.md — (restored by index guard: dropped in last review)
-- analyst-stellar_p2-s207-18745292-1.md — in-run analysis + decision log @ 12 cands (stellar_p2-s207-18745292)
-- analyst-stellar_p2-s207-18745292-2.md — in-run analysis + decision log @ 24 cands (stellar_p2-s207-18745292)
+- new-ideas/untested-ascent-mechanisms.md — (restored by index guard: dropped in last review)
+- ineffective-approaches/stellar_p2-s206-7450085.md — (restored by index guard: dropped in last review)
+- new-ideas/analyst-stellar_p2-s206-7450085-1.md — (restored by index guard: dropped in last review)
