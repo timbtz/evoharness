@@ -79,15 +79,35 @@ OVERRIDES = '{"max_evals":160,"cpu_budget":480.0,"eval_timeout":180.0}'
 MARGIN = '{"target":0.002,"slope":0.92}'
 NOVELTY = '{"min":0.003,"pen":0.05}'
 
+# A second basin, so the answer is not "the tool helps in this one valley":
+# the other Plan-1 deep run's best program (a different optimizer lineage).
+BASIN2 = "file:runs/plan1-deep-s5-85591679/best.py"
+
+# Every entry: (name, arm, seed, resume, usd, stall). BOTH ARMS OF A PAIR MUST
+# CARRY IDENTICAL usd/stall — that is the whole point. Pairs may differ from
+# each other; the pair is the unit of comparison, never a cross-pair run.
+#
+# p1/p2 are the shallow pairs (stall 25) that were already in flight. p1-on
+# stopped on stall after 30 candidates for $2.31, i.e. the $8 cap never bound —
+# so p3 re-asks the question with room to exploit the tool (stall 60, $15), and
+# p4 asks it in a different basin. Deep pairs come AFTER the shallow ones so a
+# provider death costs the cheap experiment, not the expensive one.
 STEPS = [
-    # (name, arm, seed, resume) — pairs share seed+resume; arm order alternates.
-    ("p1-on", "on", 11, CHAMPION),
-    ("p1-off", "off", 11, CHAMPION),
-    ("p2-off", "off", 13, CHAMPION),
-    ("p2-on", "on", 13, CHAMPION),
+    ("p1-on", "on", 11, CHAMPION, 8.0, 25),
+    ("p1-off", "off", 11, CHAMPION, 8.0, 25),
+    ("p2-off", "off", 13, CHAMPION, 8.0, 25),
+    ("p2-on", "on", 13, CHAMPION, 8.0, 25),
+    ("p3-on", "on", 23, CHAMPION, 15.0, 60),
+    ("p3-off", "off", 23, CHAMPION, 15.0, 60),
+    ("p4-off", "off", 29, BASIN2, 15.0, 60),
+    ("p4-on", "on", 29, BASIN2, 15.0, 60),
     # Unpaired best-effort push: accumulated memory, resumes the best program
     # the campaign produced so far (resolved at launch time).
-    ("push", "on", 17, "@best"),
+    ("push", "on", 17, "@best", 20.0, 80),
+    # push2 exists because the driver that started this campaign had already
+    # loaded the old STEPS list, so `push` fires after p2 and before the deep
+    # pairs. push2 is the same best-effort run once p3/p4 have landed.
+    ("push2", "on", 31, "@best", 20.0, 80),
 ]
 
 
@@ -104,7 +124,7 @@ def log(*a: object) -> None:
 # --------------------------------------------------------------------------
 
 def exec_arm(name: str, seed: int, resume: str, usd: float, calls: int,
-             seconds: int) -> int:
+             seconds: int, stall: int) -> int:
     """Run ONE arm in this process. The parent has already set the env."""
     from core.config import Config
     from core import loop
@@ -115,7 +135,7 @@ def exec_arm(name: str, seed: int, resume: str, usd: float, calls: int,
                   "knowledge": "wiki_fs", "roles": "single_strong"},
         budget={"max_usd": usd, "max_calls": calls, "max_seconds": seconds},
         resume_from=resume,
-        stall_stop=25,
+        stall_stop=stall,
     )
     run_dir = CAMP / name
     summary = loop.run(cfg, run_dir=run_dir)
@@ -179,7 +199,7 @@ def best_so_far(st: dict) -> str | None:
 
 
 def run_step(st: dict, name: str, arm: str, seed: int, resume: str,
-             usd: float, calls: int, seconds: int) -> None:
+             usd: float, calls: int, seconds: int, stall: int) -> None:
     run_dir = CAMP / name
     env = dict(os.environ)
     env["STELLAR_MARGIN_GRAD"] = "1" if arm == "on" else "0"
@@ -190,7 +210,8 @@ def run_step(st: dict, name: str, arm: str, seed: int, resume: str,
     env["STELLAR_HOT_RESTART"] = "1"
     env["STELLAR_SOFT_FAIL"] = "1"
 
-    log(f"--- step {name}: arm={arm} seed={seed} resume={resume} usd=${usd}")
+    log(f"--- step {name}: arm={arm} seed={seed} resume={resume} "
+        f"usd=${usd} stall={stall}")
     t0 = time.time()
     logf = CAMP / f"{name}.log"
     with logf.open("a") as fh:
@@ -198,7 +219,7 @@ def run_step(st: dict, name: str, arm: str, seed: int, resume: str,
             [sys.executable, str(Path(__file__).resolve()), "--exec-arm",
              "--name", name, "--arm", arm, "--seed", str(seed),
              "--resume", resume, "--usd", str(usd), "--calls", str(calls),
-             "--seconds", str(seconds)],
+             "--seconds", str(seconds), "--stall", str(stall)],
             cwd=str(_ROOT), env=env, stdout=fh, stderr=subprocess.STDOUT)
     wall = time.time() - t0
 
@@ -207,7 +228,8 @@ def run_step(st: dict, name: str, arm: str, seed: int, resume: str,
         if line.startswith("RUN_SUMMARY "):
             summary = json.loads(line[len("RUN_SUMMARY "):])
             break
-    rec = {"arm": arm, "seed": seed, "resume": resume, "exit": p.returncode,
+    rec = {"arm": arm, "seed": seed, "resume": resume, "usd_cap": usd,
+           "stall": stall, "exit": p.returncode,
            "wall_s": round(wall, 1), **summary}
     st["done"][name] = rec
     st["usd"] = round(st.get("usd", 0.0) + float(summary.get("usd") or 0.0), 4)
@@ -248,6 +270,7 @@ def main() -> int:
     ap.add_argument("--usd", type=float, default=8.0)
     ap.add_argument("--calls", type=int, default=400)
     ap.add_argument("--seconds", type=int, default=12 * 3600)
+    ap.add_argument("--stall", type=int, default=25)
     ap.add_argument("--global-usd", type=float, default=80.0,
                     help="runaway backstop only; the intended terminator is "
                          "provider-balance exhaustion")
@@ -257,7 +280,8 @@ def main() -> int:
     a = ap.parse_args()
 
     if a.exec_arm:
-        return exec_arm(a.name, a.seed, a.resume, a.usd, a.calls, a.seconds)
+        return exec_arm(a.name, a.seed, a.resume, a.usd, a.calls, a.seconds,
+                        a.stall)
 
     st = load_state()
 
@@ -267,9 +291,10 @@ def main() -> int:
 
     steps = [s for s in STEPS if not a.only or s[0] in a.only.split(",")]
     if a.dry_run:
-        for name, arm, seed, resume in steps:
+        for name, arm, seed, resume, usd, stall in steps:
             mark = "DONE" if name in st["done"] else "todo"
-            print(f"{mark:5s} {name:8s} arm={arm:3s} seed={seed:3d} resume={resume}")
+            print(f"{mark:5s} {name:8s} arm={arm:3s} seed={seed:3d} "
+                  f"${usd:<5} stall={stall:<3} resume={resume}")
         print(f"halt={st.get('halt')!r} usd={st.get('usd')}")
         return 0
 
@@ -282,7 +307,7 @@ def main() -> int:
     log(f"=== grad A/B campaign start (pid {os.getpid()}) — "
         f"{len([s for s in steps if s[0] not in st['done']])} steps to go ===")
 
-    for name, arm, seed, resume in steps:
+    for name, arm, seed, resume, usd, stall in steps:
         if name in st["done"]:
             log(f"skip {name} (already done)")
             continue
@@ -292,13 +317,13 @@ def main() -> int:
             break
         if resume == "@best":
             resume = best_so_far(st) or CHAMPION
-        run_step(st, name, arm, seed, resume, a.usd, a.calls, a.seconds)
+        run_step(st, name, arm, seed, resume, usd, a.calls, a.seconds, stall)
         if st.get("halt"):
             break
 
     log(f"=== campaign stop: halt={st.get('halt')!r} spent=${st.get('usd')} ===")
     # paired comparison, printed for convenience
-    for pair in ("p1", "p2"):
+    for pair in ("p1", "p2", "p3", "p4"):
         on, off = st["done"].get(f"{pair}-on"), st["done"].get(f"{pair}-off")
         if on and off:
             log(f"{pair}: ON train={on.get('train')} private={on.get('private')} | "
