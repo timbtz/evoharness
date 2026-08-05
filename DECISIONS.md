@@ -215,3 +215,93 @@ authoritative re-score runs strict (cold, hard-fail, full niter). Kill-switches
 `STELLAR_HOT_RESTART=0` / `STELLAR_SOFT_FAIL=0` (read per eval call) leave
 run_vmec unpatched. Golden tests: soft-fail dominance + monotonicity, kill-
 switch cfg plumbing. Empirical validation in experiments/hot_restart_bench.py.
+
+**2026-08-01 (Plan 2: differentiable P2 score, experiments/diffscore).** New
+analysis-only package `experiments/diffscore/` (margins_jax, elongation_jax,
+qi_jax, feasibility, difftest, margin_walk): JAX reimplementations of the five
+scored P2 constraint metrics and the QI residual with autodiff gradients. NO
+pinned dependency is patched and NOTHING in the train/eval path changes — the
+pinned in-image evaluator stays the only accept/rank authority; a strict-
+dominance guard (feasibility.rank_key, golden-tested) makes it impossible for a
+smooth surrogate value to outrank an officially-feasible-and-scored result in
+any internal fitness comparison. Development decision: the host venv (py3.13)
+has no jax/constellaration, so all diffscore parity tests and reports run
+inside the pinned eval image with the repo mounted; pytest is pip-installed
+into the EPHEMERAL container at invocation (the image on disk is not modified):
+`docker run --rm -v <repo>:/work -w /work evoharness-stellar-eval sh -c
+"pip install -q pytest && python -m pytest tests/test_diffscore.py -q"`.
+The oracle-parity corpus lives in `runs/diffscore/oracle_cache/` (stratified
+archive + seed-bank boundaries, pinned forward model at vlf + boozer arrays).
+The plan's optional config-gated `fm.margin_grad` template extension was NOT
+added: a live campaign is in flight, Plan-1's task.py changes are already
+staged-but-unactivated pending a server restart, and the host-side polish
+utility (margin_walk.py) covers the demo without touching the live task
+surface. Revisit after the Plan-1 changes are live.
+
+**2026-08-05 (gradient feedback reaches the optimizer, and how we test it).**
+The `fm.margin_grad` extension deferred on 2026-08-01 is now IN the train
+template: `fm.aspect(b)`, `fm.margin_grad(b)`, `fm.margin_step(b, target, cap)`
+— exact VMEC aspect + its analytic boundary gradient + a Newton walk onto a
+target margin, all eval-free, numpy (deliberately not jax: this code runs in the
+process that forks the eval pool, and an initialized XLA runtime there deadlocks
+on pool respawn). `STELLAR_MARGIN_GRAD=0` makes the methods refuse AND strips the
+description section, so a control run is neither given the tool nor told it
+exists; `_VERIFY` (the clean-room val/private path) is untouched, asserted in a
+golden test. Parity vs the pinned oracle over 196 boundaries: Linf 1.0e-13;
+gradient vs central FD 1.2e-9; live in-container `fm.aspect` vs simulator
+3.6e-15; `margin_step(target=0.002)` lands at 0.0020000000052.
+
+MEASURED WITH A PAIRED A/B, not a single treated arm
+(`experiments/grad_campaign.py`): p1 runs ON->OFF at seed 11, p2 runs OFF->ON at
+seed 13, both arms from the same resume point, then an unpaired `push` run for
+the leaderboard. Three design constraints this had to respect, each of which
+would have silently invalidated the comparison:
+(1) `TASK.description` is built at import, so the doc-stripping freezes per
+interpreter — ONE ARM PER PROCESS, never two in one interpreter.
+(2) The memory axis keeps ONE shared wiki per task (`memory/stellar_p2/`) that
+every run reads and extends, so the treated arm's notes ("use fm.margin_grad")
+leak straight into the control's prompts and the archive/novelty state diverges.
+The driver snapshots that directory once and restores it before every A/B arm,
+preserving each arm's output in `<run_dir>/memory-after/` first. The unpaired
+`push` step deliberately keeps accumulated memory: it is a score run, not
+science.
+(3) The env must be `serve.sh`'s, not the Plan-1 pipeline's — above all
+`eval_timeout: 180`, because the 60s default silently -inf's slow evals on this
+contended box (it already cost runs s105 and s103-*). `STELLAR_MARGIN` (honest
+margin discount) is stated explicitly rather than left to the default: a tool
+that lands the aspect wall to 11 digits is a BETTER camping instrument than the
+contraction ladder was if the discount is off. Plan-1 features are held ON in
+both arms, so the gradient tool is the only variable — which also means
+plan1-deep-s5/s7 are an indicative reference, not the control.
+The campaign halts on provider death (429/1113, or two consecutive sub-5-minute
+sub-$0.05 runs), not on a dollar cap; `runs/grad_campaign/state.json` makes it
+restartable.
+
+**Plan 3 is gated on a measurement, not started.** `experiments/fd_qi_probe.py`
+gets the d(qi)/d(boundary) that Plan 3's IFT adjoint would produce — by finite
+differences, ~2 solves per coefficient instead of the adjoint's ~2-3 per
+gradient, i.e. the same signal ~100x more expensively. Cheap enough on a handful
+of boundaries to answer "is the direction worth anything?" BEFORE the adjoint is
+written. It does NOT finite-difference qi: it contracts Plan-2's analytic
+d(qi)/d(bmnc_b) and d(qi)/d(iota) (evaluated once at the base point) against
+finite differences of the BOOZER ARRAYS only. Measured justification: the
+contraction reproduces the analytic directional derivative to 7e-13, while a
+direct FD of qi along a random direction disagrees with the a.e. gradient by
+7.1e-3 (qi.py's argsort/bounce-birth kinks — the effect Plan 2 quantified).
+Only already-nonzero coefficients are perturbed: the vlf preset sets mpol/ntor
+from the boundary's largest nonzero modes, so waking a zero coefficient changes
+the solver grid and the column would measure a grid change, not a derivative;
+shape mismatch drops the column loudly. Every descent step is re-scored by a
+fresh pinned forward call. `experiments/after_campaign.sh` chains it: wait for
+the campaign, restart the server via `serve.sh`, then run the probe with the
+box's CPUs to itself.
+
+Upstream state verified 2026-08-05 (the Plan-3 pre-flight's moving facts): the
+hard half of the adjoint — matrix-free dF/dx plus preconditioner
+(`hessian_vector_product`, `apply_preconditioner`, `get_state`/`get_forces`) —
+is MERGED (proximafusion/vmecpp #567-#577, #580) and shipping in vmecpp 0.7.1 on
+PyPI, so no Enzyme/LLVM build is needed to reproduce it. Only dF/dp (boundary)
+is missing: open PR #581, or FD force-columns. The plan's #591/#592/#609 do not
+exist. The pinned evaluator stays `constellaration 0.2.6` -> `vmecpp==0.4.11`
+(hard pin, verified on PyPI — an image rebuild is reproducible), and the sidecar
+version drift 0.4.11 vs 0.7.1 remains unmeasured.
