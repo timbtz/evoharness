@@ -61,6 +61,12 @@ _SLACK = 240.0   # container start + jax import/JIT + the last in-flight eval
 # take 12-27s per forward call, so every tail item is ~20x the mp=1 case
 _MEM_MB = 4096   # jax wants >= 2 GB; fork workers add ~0.5 GB each over COW
 
+# Plan-2 margin tools in the train template (exact aspect value + gradient +
+# margin walk, all eval-free). STELLAR_MARGIN_GRAD=0 = the A/B control arm:
+# the fm methods refuse AND the description section is stripped, so the control
+# writer is not told about a tool it does not have.
+_GRAD_DOC = ("<!--MARGIN-GRAD-->", "<!--/MARGIN-GRAD-->")
+
 # boundaries at least this good (shaped) enter the persistent archive; anything
 # beating the archive's current best is always kept so a frontier trail exists
 # from the first infeasible runs on
@@ -222,8 +228,109 @@ if _HR_ON or _SF_ON:
     _vu.run_vmec = _run_vmec  # forward_model resolves it via the module attr
 '''
 
+# ---- Plan-2 margin gradients: exact, eval-free aspect control -------------
+# Numpy port of experiments/diffscore/margins_jax.aspect_ratio + its analytic
+# gradient (JAX parity is a golden test: value 1e-13, gradient 1e-9 vs the
+# autodiff reference). numpy and NOT jax on purpose — this runs in the parent
+# process, which forks the eval pool; a jax op here would leave an initialized
+# XLA runtime in the parent and the pool respawn after an eval timeout would
+# fork it (the documented deadlock). Aspect is the only scored constraint that
+# is exactly boundary-only (Plan-2 pre-flight), so it is the only one that can
+# be handed to candidate code for free; qi/iota/mirror stay measured, and
+# elongation needs the magnetic axis, i.e. an equilibrium.
+# Kill-switch: STELLAR_MARGIN_GRAD=0 (also strips the description section, so
+# the A/B control run neither has nor is told about the tool).
+_GRAD_SRC = '''
+_ASPECT_BOUND = 10.0            # problems.py:214 -> violation = (aspect-10)/10
+_GRID = (128, 128)              # theta/phi samples; exact for band-limited R,Z
+_ANG = {}                       # (mpol, cols, nfp) -> angle tables
+
+def _ang_tables(rc, nfp):
+    key = (rc.shape[0], rc.shape[1], nfp)
+    if key not in _ANG:
+        _ANG.clear()            # one boundary shape at a time: tables are ~30 MB
+        mpol, cols = rc.shape
+        ntor = (cols - 1) // 2
+        m = np.arange(mpol, dtype=float)[:, None, None, None]
+        n = np.arange(-ntor, ntor + 1, dtype=float)[None, :, None, None]
+        nth, nph = _GRID
+        th = np.linspace(0.0, 2.0 * np.pi, nth, endpoint=False)
+        ph = np.linspace(0.0, 2.0 * np.pi / nfp, nph, endpoint=False)
+        ang = m * th[None, None, :, None] - nfp * n * ph[None, None, None, :]
+        _ANG[key] = (m[:, :, 0, 0], np.cos(ang), np.sin(ang),
+                     2.0 * np.pi / nth, nph)
+    return _ANG[key]
+
+def _aspect_full(r_cos, z_sin, nfp):
+    """(aspect, d aspect/d r_cos, d aspect/d z_sin) from the boundary alone —
+    VMEC's definition: Aminor = sqrt(<area(phi)>/pi), Rmajor = V/(2 pi^2
+    Aminor^2), aspect = Rmajor/Aminor. Trapezoid sums are exact here, so this
+    reproduces wout.aspect to ~1e-13 without solving anything."""
+    rc = np.asarray(r_cos, float)
+    zs = np.asarray(z_sin, float)
+    m, cos_a, sin_a, dth, nph = _ang_tables(rc, int(nfp))
+    R = np.einsum('mn,mntp->tp', rc, cos_a)
+    dRdt = np.einsum('mn,mntp->tp', -m * rc, sin_a)
+    dZdt = np.einsum('mn,mntp->tp', m * zs, cos_a)
+    Z = np.einsum('mn,mntp->tp', zs, sin_a)
+    raw_area = -np.sum(Z * dRdt, axis=0) * dth        # signed area per phi
+    sa = np.where(raw_area >= 0.0, 1.0, -1.0)
+    A = float(np.mean(np.abs(raw_area)))
+    raw_vol = float(np.mean(np.sum(0.5 * R**2 * dZdt, axis=0) * dth)) * 2.0 * np.pi
+    sv, V = (1.0, raw_vol) if raw_vol >= 0.0 else (-1.0, -raw_vol)
+    aspect = V / (2.0 * np.pi**2 * (A / np.pi) ** 1.5)
+    # aspect is linear in V and ~A^-3/2, so the chain rule collapses to two terms
+    w = dth / nph
+    dA_rc = w * m * np.einsum('mntp,tp->mn', sin_a, Z * sa)
+    dA_zs = -w * np.einsum('mntp,tp->mn', sin_a, dRdt * sa)
+    c = sv * 2.0 * np.pi * w
+    dV_rc = c * np.einsum('mntp,tp->mn', cos_a, R * dZdt)
+    dV_zs = c * 0.5 * m * np.einsum('mntp,tp->mn', cos_a, R**2)
+    return (aspect, aspect * (dV_rc / V - 1.5 * dA_rc / A),
+            aspect * (dV_zs / V - 1.5 * dA_zs / A))
+
+def _free_mask(rc, zs):
+    """Coefficients a step may touch: stellarator symmetry pins r_cos[0,n<0]
+    and z_sin[0,n<=0] at zero."""
+    ntor = (rc.shape[1] - 1) // 2
+    mr, mz = np.ones_like(rc), np.ones_like(zs)
+    mr[0, :ntor] = 0.0
+    mz[0, :ntor + 1] = 0.0
+    return mr, mz
+
+def _aspect_walk(r_cos, z_sin, nfp, target, cap):
+    """Newton walk in boundary space onto a target aspect violation. Every
+    iteration is exact and costs no eval, so this LANDS on the target instead
+    of predicting it; `cap` bounds the total max-coefficient displacement."""
+    rc = np.array(r_cos, float)
+    zs = np.array(z_sin, float)
+    mr, mz = _free_mask(rc, zs)
+    moved = 0.0
+    for _ in range(6):
+        a, g_rc, g_zs = _aspect_full(rc, zs, nfp)
+        want = float(target) - (a - _ASPECT_BOUND) / _ASPECT_BOUND
+        room = cap - moved
+        if abs(want) < 1e-9 or room <= 0.0:
+            break
+        g = np.concatenate([(g_rc * mr).ravel(),
+                            (g_zs * mz).ravel()]) / _ASPECT_BOUND
+        gg = float(g @ g)
+        if gg <= 0.0:
+            break
+        x = g * (want / gg)                    # min-norm step, violation units
+        big = float(np.max(np.abs(x)))
+        if big > room:
+            x *= room / big
+            big = room
+        moved += big
+        rc = rc + x[:rc.size].reshape(rc.shape)
+        zs = zs + x[rc.size:].reshape(zs.shape)
+    return rc, zs
+'''
+exec(_GRAD_SRC)  # noqa: S102 — the golden tests check this exact source
+
 # ---- optimizer-run template: candidate code + metered fm handle ------------
-_TEMPLATE = _PRELUDE + _HOTPATCH + '''
+_TEMPLATE = _PRELUDE + _HOTPATCH + _GRAD_SRC + '''
 def _worker(job):
     """One forward eval in a pool worker; never raises.
     job = (boundary, fid, strict) — strict is the final authoritative re-score:
@@ -365,6 +472,42 @@ class _FM:
                 "no public submissions are available. Build the boundary from "
                 "fm.seed_nae(...) / fm.seed_ellipse(...) only.")
         return json.loads(json.dumps(CFG["seed_bank"][int(i)]["boundary"]))
+    # ---- exact boundary-margin tools (Plan 2): no eval budget, no solver ----
+    def aspect(self, boundary):
+        """Exact VMEC aspect ratio of a boundary (free). Same number the
+        simulator would report, computed from the Fourier coefficients."""
+        self._grad_on()
+        a, _, _ = _aspect_full(boundary["r_cos"], boundary["z_sin"],
+                               boundary["n_field_periods"])
+        return a
+    def margin_grad(self, boundary):
+        """Exact aspect-ratio margin and its gradient (free). Returns
+        {"aspect", "violation", "grad_r_cos", "grad_z_sin"} where the gradients
+        are d(normalized violation)/d(coefficient), already zeroed on the
+        coefficients stellarator symmetry pins."""
+        self._grad_on()
+        a, g_rc, g_zs = _aspect_full(boundary["r_cos"], boundary["z_sin"],
+                                     boundary["n_field_periods"])
+        mr, mz = _free_mask(np.asarray(boundary["r_cos"], float),
+                            np.asarray(boundary["z_sin"], float))
+        return {"aspect": a, "violation": (a - _ASPECT_BOUND) / _ASPECT_BOUND,
+                "grad_r_cos": (g_rc * mr / _ASPECT_BOUND).tolist(),
+                "grad_z_sin": (g_zs * mz / _ASPECT_BOUND).tolist()}
+    def margin_step(self, boundary, target=0.002, cap=3e-3):
+        """Boundary moved so its aspect violation equals `target` (free): a
+        min-norm Newton walk on the exact gradient, capped at `cap` in
+        max-coefficient distance. The geometric margin lands where you asked;
+        the equilibrium-carried margins (qi above all) move too and are NOT
+        modelled here — re-evaluate before you trust the result."""
+        self._grad_on()
+        rc, zs = _aspect_walk(boundary["r_cos"], boundary["z_sin"],
+                              boundary["n_field_periods"], target, cap)
+        b = json.loads(json.dumps(boundary))
+        b["r_cos"], b["z_sin"] = rc.tolist(), zs.tolist()
+        return b
+    def _grad_on(self):
+        if not CFG.get("margin_grad"):
+            raise RuntimeError("margin-gradient tools are disabled for this run")
     def bank_dist(self, boundary):
         """Max-coefficient distance to the closest same-nfp bank seed (padded
         canvas) — the export guard's + harness novelty penalty's exact metric.
@@ -632,10 +775,21 @@ def _parse(r, timeout: float) -> EvalResult:
                           error="malformed score payload", seconds=r.seconds)
 
 
+def _description() -> str:
+    """Writer-visible task description. With the margin tools switched off the
+    section documenting them is stripped, so the A/B control run is neither
+    given the tool nor told it exists."""
+    text = (_DIR / "description.md").read_text()
+    if os.environ.get("STELLAR_MARGIN_GRAD", "1") != "0":
+        return text
+    head, _, rest = text.partition(_GRAD_DOC[0])
+    return head + rest.partition(_GRAD_DOC[1])[2]
+
+
 class _StellarP2Task:
     name = "stellar_p2"
     wiki_dir = _DIR / "wiki"
-    description = (_DIR / "description.md").read_text()
+    description = _description()
     noise: dict = {}         # deterministic sim: no tie re-run machinery
     extra_splits = ()
 
@@ -737,6 +891,9 @@ class _StellarP2Task:
                    "STELLAR_HOT_RESTART_TOL", "1e-3")),
                "soft_fail_niter": int(os.environ.get(
                    "STELLAR_SOFT_FAIL_NITER", "5000")),
+               # Plan-2 exact aspect gradient handed to candidate code (the
+               # description section is gated at import; this flag per call)
+               "margin_grad": os.environ.get("STELLAR_MARGIN_GRAD", "1") != "0",
 
                "seed_bank": [{"boundary": e["boundary"],
                               "score": e["official_score"],

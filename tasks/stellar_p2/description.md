@@ -116,6 +116,38 @@ squeezing the last 0.001 of aspect-ratio tolerance is now worth roughly nothing,
 and a boundary that reaches the same L at feasibility 0.002 beats one that needs
 0.009. Raise L by structure.
 
+<!--MARGIN-GRAD-->
+EXACT ASPECT GRADIENT (2026-08-05, new — free, no eval budget, no solver call):
+aspect_ratio is the one scored constraint that depends on the boundary ALONE.
+It is now computed exactly (~1e-13 against the simulator) and differentiated in
+closed form, so the margin that is almost always binding costs zero evals to
+read and to place:
+- fm.aspect(b) -> float. The exact aspect ratio the simulator would report.
+  Screen candidate boundaries before spending an eval on them.
+- fm.margin_grad(b) -> {"aspect", "violation", "grad_r_cos", "grad_z_sin"}:
+  violation = (aspect - 10)/10 (the normalized number the feasibility rule
+  uses), and the gradients are d(violation)/d(coefficient) as matrices shaped
+  like r_cos/z_sin, already zeroed where symmetry pins a coefficient.
+- fm.margin_step(b, target=0.002, cap=3e-3) -> a new boundary whose aspect
+  violation IS target (an exact Newton walk, not a linear guess), moved by at
+  most `cap` in max-coefficient distance.
+Two things this is for. (1) Margin placement: honest fitness discounts every
+unit of feasibility above 0.002, so put the geometric margin exactly at 0.002
+in one free call instead of bisecting it with a ladder of evals. (2) Constant-
+margin structure search: project any structural move you invent onto the
+subspace orthogonal to grad_r_cos/grad_z_sin (x -= g * (x.g)/(g.g), flattening
+both matrices into one vector) and it changes shape WITHOUT moving the aspect
+margin — that is how you raise L without paying tolerance.
+MEASURED CAVEAT, take it seriously: the qi margin is coupled and moves AGAINST
+aspect at 1.5-3x strength in violation units on tight boundaries, and qi is NOT
+modelled here (it needs an equilibrium solve). A stepped boundary can land its
+aspect margin perfectly and still be infeasible on qi. Nothing is verified
+until fm.eval says so; use the free tools to spend evals on the constraints
+that actually need them. Each call costs ~0.1-0.5 s of your CPU deadline on
+high-mode boundaries — batch your bookkeeping, don't call them per candidate in
+an inner loop of thousands.
+<!--/MARGIN-GRAD-->
+
 SHAPE NOVELTY, NOT JUST DISTANCE (2026-07-27): max-coefficient distance is a
 weak novelty test. The previous campaign's champion cleared the 1e-3 export ball
 at bank_dist 2.6e-3 while being cosine 0.999989 to the public #1 boundary — the

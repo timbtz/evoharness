@@ -531,3 +531,78 @@ def test_memory_index_guard(tmp_path, monkeypatch):
     idx = (mem.dir / "index.md").read_text()
     assert "new-ideas/dropped.md" in idx and "index guard" in idx
     assert mem._index_guard() == []  # idempotent
+
+
+# 17. Plan-2 margin tools (2026-08-05): the exact aspect the train template
+# hands candidates must BE the simulator's aspect (parity against the pinned
+# oracle corpus, no docker needed), its gradient must match finite differences,
+# and the Newton walk must land the normalized violation ON its target.
+def test_stellar_aspect_parity_and_walk():
+    import numpy as np
+
+    from tasks.stellar_p2 import task as st
+    cache = st._ROOT / "runs" / "diffscore" / "oracle_cache" / "index.jsonl"
+    if not cache.exists():
+        pytest.skip("oracle corpus not built (experiments.diffscore.difftest)")
+    rows = [r for r in (json.loads(ln) for ln in cache.read_text().splitlines())
+            if "boundary" in r]
+    worst = 0.0
+    for r in rows:
+        b = r["boundary"]
+        a, _, _ = st._aspect_full(b["r_cos"], b["z_sin"], b["n_field_periods"])
+        worst = max(worst, abs(a - r["aspect_ratio"]))
+    assert worst < 1e-11, worst          # measured 1.0e-13 over 196 boundaries
+
+    b = rows[0]["boundary"]
+    rc, zs = np.array(b["r_cos"]), np.array(b["z_sin"])
+    nfp = b["n_field_periods"]
+    a, g_rc, g_zs = st._aspect_full(rc, zs, nfp)
+    rng = np.random.default_rng(0)
+    d_rc, d_zs = rng.standard_normal(rc.shape), rng.standard_normal(zs.shape)
+    scale = np.sqrt((d_rc**2).sum() + (d_zs**2).sum())
+    d_rc, d_zs, h = d_rc / scale, d_zs / scale, 1e-6
+    fd = (st._aspect_full(rc + h * d_rc, zs + h * d_zs, nfp)[0]
+          - st._aspect_full(rc - h * d_rc, zs - h * d_zs, nfp)[0]) / (2 * h)
+    assert abs(fd - float((g_rc * d_rc).sum() + (g_zs * d_zs).sum())) \
+        / abs(fd) < 1e-6
+
+    for target in (0.002, 0.0):
+        wc, ws = st._aspect_walk(rc, zs, nfp, target, 3e-3)
+        v = (st._aspect_full(wc, ws, nfp)[0] - 10.0) / 10.0
+        assert abs(v - target) < 1e-8, (target, v)
+        step = max(np.abs(wc - rc).max(), np.abs(ws - zs).max())
+        assert step <= 3e-3 + 1e-12      # trust region holds
+    # symmetry-pinned coefficients are never moved by a step
+    wc, ws = st._aspect_walk(rc, zs, nfp, 0.005, 3e-3)
+    ntor = (rc.shape[1] - 1) // 2
+    assert np.array_equal(wc[0, :ntor], rc[0, :ntor])
+    assert np.array_equal(ws[0, :ntor + 1], zs[0, :ntor + 1])
+
+
+# 17b. The tools are a config-gated A/B arm: with STELLAR_MARGIN_GRAD=0 the
+# container flag is off (fm raises) and the description never mentions them.
+def test_stellar_margin_grad_killswitch(monkeypatch):
+    import ast
+
+    from core.sandbox import SandboxResult
+    from tasks.stellar_p2 import task as st
+    seen = {}
+
+    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1):
+        seen["script"] = script
+        return SandboxResult("", "", 1, 0.1, False)
+
+    monkeypatch.setattr(st, "_runner", fake_runner)
+    for env, want in (("0", False), ("1", True)):
+        monkeypatch.setenv("STELLAR_MARGIN_GRAD", env)
+        st.TASK._train("def solve(fm, rng):\n    return None\n")
+        raw = seen["script"].split("json.loads(")[1] \
+                            .split(")  # JSON string literal")[0]
+        assert json.loads(ast.literal_eval(raw))["margin_grad"] is want
+    monkeypatch.setenv("STELLAR_MARGIN_GRAD", "0")
+    doc = st._description()
+    assert "fm.margin_step" not in doc and st._GRAD_DOC[0] not in doc
+    monkeypatch.setenv("STELLAR_MARGIN_GRAD", "1")
+    assert "fm.margin_step" in st.TASK.description
+    # analysis-only guarantee: the clean-room verify template stays untouched
+    assert "_aspect_walk" not in st._VERIFY and "margin_grad" not in st._VERIFY
