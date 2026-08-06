@@ -20,7 +20,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then LOG "another phase2 holds $LOCK"; exit 0; f
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 LOG "=== phase2 start (pid $$) — waiting for the first driver and the probe ==="
-while pgrep -f '[g]rad_campaign\.py$' > /dev/null \
+while pgrep -f '[g]rad_campaign\.py' > /dev/null \
    || pgrep -f '[a]fter_campaign\.sh' > /dev/null; do
     sleep 120
 done
