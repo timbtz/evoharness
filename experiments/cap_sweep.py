@@ -67,7 +67,28 @@ def main() -> int:
     ap.add_argument("--fidelity", default="very_low_fidelity")
     a = ap.parse_args()
 
-    from experiments.diffscore.difftest import run_oracle
+    # metrics only — difftest.run_oracle additionally runs the Boozer
+    # transform to produce JAX arrays, and THAT is what does not fit in a 2 GB
+    # container while the campaign holds the box (measured: rss is 54 MB right
+    # up to the oracle call, then the container is OOM-killed). The forward
+    # model already returns qi, so the boozer pass is pure overhead here.
+    def run_oracle(boundary_dict, fidelity):
+        from constellaration import forward_model as fmod, problems
+        from constellaration.geometry import surface_rz_fourier as srf
+        from constellaration.mhd import vmec_settings as vs
+        b = srf.SurfaceRZFourier.model_validate(boundary_dict)
+        m, _eq = fmod.forward_model(b, settings=fmod.ConstellarationSettings(
+            vmec_preset_settings=vs.VmecPresetSettings(fidelity=fidelity),
+            turbulent_settings=None))
+        p2 = problems.SimpleToBuildQIStellarator()
+        return {
+            "aspect_ratio": float(m.aspect_ratio),
+            "qi": None if m.qi is None else float(m.qi),
+            "minimum_normalized_magnetic_gradient_scale_length": float(
+                m.minimum_normalized_magnetic_gradient_scale_length),
+            "feasibility": float(p2.compute_feasibility(m)),
+        }, None
+
     # the SHIPPED walk, exec'd into the task module by task.py itself
     import tasks.stellar_p2.task as T
 
