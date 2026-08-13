@@ -360,3 +360,85 @@ regime by 1-3 orders of magnitude. Smoothing cannot substitute for small steps.
 Consequence for Plan 3, cutting both ways: the plan's cost model ("42-attempt
 gradient-free polish is starved") overestimates progress per step, but the case
 for an O(1) adjoint gets STRONGER, because 1e-5 steps mean many more gradients.
+
+**2026-08-06 (the gradient A/B is null, and it tested the wrong constraint).**
+Five arms, $14.46, halted by the operator 2026-08-06 15:05. p1 delta honest
+-0.00199, p2 +0.00288 — opposite signs, no detectable effect at n=2, and three of
+five arms selected the RESUMED SEED as their best. The verdict that matters is
+not the null but its cause: the only gradient tools the writers had were
+`fm.aspect`/`margin_grad`/`margin_step`, all boundary-only, i.e. **aspect**. Plan
+2 had already measured that qi opposes every geometric move at 1.5-3x strength,
+and on the champion boundary aspect sits at the wall while qi is what resists. So
+the campaign measured an aspect tool, not gradient feedback. Do not cite it as
+evidence about the latter. Two mechanism findings survive: `margin_step` uniquely
+produced boundaries that fail the authoritative re-score (3 in p1-on, 0 in any
+control), and the writers chose caps of 2e-3..4e-3, ~100x outside the region
+where the gradient is valid.
+
+**2026-08-10a (the FD polish loop works, converges, and transfers).**
+`experiments/qi_polish.py` descends the PINNED solver directly: analytic
+downstream gradient contracted against FD of the wout/Boozer arrays, ~41 solves
+(~12 min) per re-linearization, projected to hold the active constraints. Result
+over 17 steps / 715 solves: honest 0.619963 -> 0.622759, terminating by trust-
+region collapse, not by budget. **The gain transfers**: re-scored at official
+high fidelity, 0.632082 -> 0.634038, i.e. +0.00196 official against +0.00280 vlf
+(70%), with feasibility TIGHTENING 0.004728 -> 0.004361. Descending a cheap
+fidelity moves the expensive score in the same direction — the premise the whole
+41-solves-per-gradient economy rests on. Two defects found and fixed in the loop
+itself: the acceptance test compared against `trajectory[-1]`, which after a
+rejection is the REJECTED candidate, so the loop accepted a regression and
+overwrote its only copy of the best boundary (now compares against the incumbent
+and writes `best_boundary.json`); and the 2026-08-06 stop was an OOM kill, not a
+decision (now supervised by `experiments/polish_supervise.sh`, which resumes).
+Shape of the trajectory, which is the real finding: every rejection lands at
+feasibility ~0.0039-0.0045 and every acceptance holds ~0.00213 — the loop is
+pinned against the **qi wall**, and the trust region collapses because there is
+nowhere to go that the projection can hold, not because the gradient is wrong.
+
+**2026-08-10b (solver gradients wired into the optimizer).** New `fm.metric_grad`
+(grad_L, grad_qi, grad_aspect, grad_elongation; COSTS 2k+1 evals) and
+`fm.grad_step` (projected step, free), gated by `STELLAR_FULL_GRAD` (default off,
+description section stripped when off — the A/B discipline). Three implementation
+facts worth keeping: (1) the eval sandbox ships ONE main.py into a read-only
+mount under `python3 -I`, so the diffscore package was simply unreachable from
+candidate code — this, not an oversight, is why only the numpy aspect gradient
+was ever exposed; `run_python_docker` gained `extra_files` and the gradient child
+gets PYTHONPATH=/work. (2) jax must never initialize in the template's parent (it
+forks the eval pool), so the gradient runs as a CHILD process. (3) The step rule
+projects JOINTLY onto the null space of all active constraints; the polish loop's
+sequential Gram-Schmidt silently reintroduces an aspect component on the second
+pass. One gradient does not fit the campaign's 160-eval/480 s candidate budget,
+so gradient runs use 400/2400 — a deliberate break in comparability with the A/B.
+
+**2026-08-10c (Plan 3 ruled out, not deferred).** Three independent blockers, any
+one fatal: pinned vmecpp 0.4.11 exposes only `run()` (no `VmecModel` until 0.6.0)
+so F(x,p) is unreachable; the adjoint RHS needs a **VJP of the wout writer, which
+exists on no code** — vmecpp and VMEX both keep a NumPy wout lane plus a separate
+traceable recomputation; and qi needs a Boozer chain no VMEC adjoint supplies.
+Unpinning is not available: the official HF Space scores with an UNPINNED
+constellaration, which today resolves to 0.2.6 + vmecpp 0.4.11 = exactly our pin
+(so re-check PyPI for 0.2.7 before any submission — one Space rebuild silently
+re-bases the leaderboard). DESC is out on tolerances (1e-2 on gmnc/bsupumnc when
+0.0097 of score already exceeds the prize). Recommended instead, 3-5 days: make
+FD cheaper — parallelize the stencil (the container holds 2 CPUs but uses one),
+one-sided differences, randomized sketch over all ~225 coefficients instead of
+the top 20. Correction to the pre-flight's razor: its "sign agreement 1 of 3"
+test let two factors vary at once; isolated, cross-version disagreement in
+d(wout)/dp is 13-34%, SMALLER than the pinned FD estimator's own truncation error
+(27-44%). The razor should read: a foreign solver may supply d(wout)/dp, never
+the downstream functional.
+
+**2026-08-11 (g1: correct tools, correct usage, no movement).** First
+STELLAR_FULL_GRAD run (seed 29, resume the 0.6408 champion, $4.71, 8.2 h, 152
+calls, stall-25) selected **the resumed seed**. Adoption was real: 18 of 49
+candidates called `metric_grad`, 15 called `grad_step`, and 18 of 21 step caps
+were <= 3e-5 (vs the previous campaign's exclusive 2e-3..4e-3) — the docs
+changed behaviour. Gradient candidates spent a median 60 evals/648 s vs 34/290 s
+and died slightly LESS often (5/18 vs 11/32). But the best submittable honest
+score was 0.616326 (c0008) against the seed's 0.616006. The run's headline number,
+c0023 at honest 0.629941, is a **camper**: bank_dist 8.9e-4, bank_cos 0.999999 —
+inside the export guard, unsubmittable, and already carrying a 0.0352 novelty
+penalty in its train score. Reporting rule adopted (`experiments/gradrun_report.py`):
+quote the best SUBMITTABLE honest score, list campers separately. Reading: the
+0.6408 basin looks like a local optimum that gradient information does not
+escape; if g2 replicates, the next move is basin escape, not better derivatives.

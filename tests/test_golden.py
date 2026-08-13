@@ -466,8 +466,9 @@ def test_stellar_hot_restart_killswitch(monkeypatch):
     from tasks.stellar_p2 import task as st
     seen = {}
 
-    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1):
+    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1, extra_files=None):
         seen["script"] = script
+        seen["extra_files"] = extra_files
         return SandboxResult("", "", 1, 0.1, False)
 
     def shipped_cfg():
@@ -588,8 +589,9 @@ def test_stellar_margin_grad_killswitch(monkeypatch):
     from tasks.stellar_p2 import task as st
     seen = {}
 
-    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1):
+    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1, extra_files=None):
         seen["script"] = script
+        seen["extra_files"] = extra_files
         return SandboxResult("", "", 1, 0.1, False)
 
     monkeypatch.setattr(st, "_runner", fake_runner)
@@ -606,3 +608,74 @@ def test_stellar_margin_grad_killswitch(monkeypatch):
     assert "fm.margin_step" in st.TASK.description
     # analysis-only guarantee: the clean-room verify template stays untouched
     assert "_aspect_walk" not in st._VERIFY and "margin_grad" not in st._VERIFY
+
+
+def test_stellar_solver_grad_killswitch(monkeypatch):
+    """STELLAR_FULL_GRAD gates the metric_grad/grad_step tools, their docs AND
+    the diffscore files shipped into the sandbox — all three together, so a run
+    without the flag is byte-identical to one from before they existed."""
+    import ast
+
+    from core.sandbox import SandboxResult
+    from tasks.stellar_p2 import task as st
+    seen = {}
+
+    def fake_runner(script, timeout=30.0, mem_mb=0, cpus=1, extra_files=None):
+        seen["script"], seen["extra_files"] = script, extra_files
+        return SandboxResult("", "", 1, 0.1, False)
+
+    monkeypatch.setattr(st, "_runner", fake_runner)
+    for env, want in (("0", False), ("1", True)):
+        monkeypatch.setenv("STELLAR_FULL_GRAD", env)
+        st.TASK._train("def solve(fm, rng):\n    return None\n")
+        raw = seen["script"].split("json.loads(")[1] \
+                            .split(")  # JSON string literal")[0]
+        assert json.loads(ast.literal_eval(raw))["full_grad"] is want
+        assert (seen["extra_files"] is not None) is want
+        doc = st._description()
+        assert ("fm.metric_grad" in doc) is want
+        if not want:                      # stripped section leaves no marker behind
+            assert st._SOLVEGRAD_DOC[0] not in doc and st._SOLVEGRAD_DOC[1] not in doc
+
+    ship = seen["extra_files"]
+    assert "experiments/diffscore/boundary_grad.py" in ship
+    assert "experiments/__init__.py" in ship             # namespace pkg synthesized
+    for rel, src in ship.items():
+        compile(src, rel, "exec")                        # every shipped file parses
+    # the clean-room verify path never gets the gradient machinery
+    assert "metric_grad" not in st._VERIFY and "boundary_grad" not in st._VERIFY
+
+
+def test_stellar_grad_step_composite_objective():
+    """The step ascends honest score (including normalized qi), not raw L."""
+    import numpy as np
+
+    from tasks.stellar_p2 import task as st
+    ns = {"np": np}
+    exec(st._GRAD_SRC, ns)
+    exec(st._SOLVEGRAD_SRC, ns)
+
+    rng = np.random.default_rng(0)
+    shape = (4, 7)
+    def blk(a): return {"r_cos": a[0].tolist(), "z_sin": a[1].tolist()}
+    gL = rng.normal(size=(2, *shape))
+    ga = rng.normal(size=(2, *shape))
+    gq = rng.normal(size=(2, *shape))
+    grad = {"grad_L": blk(gL), "grad_aspect": blk(ga), "grad_qi": blk(gq),
+            "base": {"violations": [0.003, -0.05, -0.0005, -0.01, -0.1]}}
+
+    cap = 3e-5
+    step, active = ns["_grad_step_vec"](grad, cap, 0.002)
+    assert active == ["aspect"]
+    assert abs(np.abs(step).max() - cap) < 1e-18        # cap is exact, not a bound
+    flat = ns["_gflat"]
+    expected = flat(grad["grad_L"]) / 20 - 0.92 * flat(grad["grad_aspect"])
+    expected = expected / np.abs(expected).max() * cap
+    assert np.allclose(step, expected)
+
+    grad["base"]["violations"] = [0.001, -0.05, 0.004, -0.01, -0.1]
+    step2, active2 = ns["_grad_step_vec"](grad, cap, 0.002)
+    assert active2 == ["qi"]
+    expected2 = flat(grad["grad_L"]) / 20 - 0.92 * flat(grad["grad_qi"]) / 4
+    expected2 = expected2 / np.abs(expected2).max() * cap
+    assert np.allclose(step2, expected2)

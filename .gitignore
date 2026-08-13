@@ -9,3 +9,4 @@ tasks/binpacking/instances/*.json
 tasks/tsp/instances/*.tsp
 tasks/cvrp/instances/
 server.log
+plans/

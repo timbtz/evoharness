@@ -48,7 +48,7 @@ def _novelty(cand: Candidate, refs: list[Candidate]) -> float:
     """1 - similarity to the NEAREST accepted program (0 = identical, 1 = unrelated)."""
     if not refs:
         return 1.0
-    return max(1.0 - difflib.SequenceMatcher(None, cand.code, r.code).ratio() for r in refs)
+    return min(1.0 - difflib.SequenceMatcher(None, cand.code, r.code).ratio() for r in refs)
 
 
 def _novelty_bin(nov: float) -> int:
@@ -88,6 +88,8 @@ class QualityDiversity:
         desc = self._descriptor(cand, pool)
         champ = self.cells.get(desc)
         if champ is None or self.key(cand, pool, self.split) > self.key(champ, pool, self.split):
+            if champ is not None:
+                champ.meta["pruned"] = True
             self.cells[desc] = cand
             return True
         return False

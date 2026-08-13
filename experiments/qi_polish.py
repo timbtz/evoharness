@@ -135,18 +135,29 @@ def main() -> int:
     ap.add_argument("--h", type=float, default=3e-5)
     ap.add_argument("--trust", type=float, default=TRUST)
     ap.add_argument("--fidelity", default="very_low_fidelity")
+    ap.add_argument("--boundary-file",
+                    help="JSON boundary (or object containing a boundary key)")
+    ap.add_argument("--out", help="isolated output directory; required for parallel studies")
+    ap.add_argument("--fresh", action="store_true",
+                    help="start a new trajectory even if state.json exists")
     a = ap.parse_args()
 
     from experiments.diffscore.difftest import run_oracle
     from experiments.fd_qi_probe import aspect_grad, load_cases, pick_coeffs
 
-    OUT.mkdir(parents=True, exist_ok=True)
-    state_p = OUT / "state.json"
-    if state_p.exists():
+    out = Path(a.out).resolve() if a.out else OUT
+    out.mkdir(parents=True, exist_ok=True)
+    state_p = out / "state.json"
+    if state_p.exists() and not a.fresh:
         st = json.loads(state_p.read_text())
         print(f"resuming at step {len(st['trajectory']) - 1}", flush=True)
     else:
-        case = load_cases(["champion"])[0]
+        if a.boundary_file:
+            payload = json.loads(Path(a.boundary_file).read_text())
+            boundary = payload.get("boundary", payload)
+        else:
+            boundary = load_cases(["champion"])[0]["boundary"]
+        case = {"boundary": boundary}
         m0, _ = run_oracle(case["boundary"], a.fidelity)
         st = {"boundary": case["boundary"], "trust": a.trust, "solves": 1,
               "trajectory": [{"step": 0, "honest": honest_of(m0),
@@ -169,18 +180,31 @@ def main() -> int:
         asp, asp_v, ga_rc, ga_zs = aspect_grad(b0)
         ga = np.concatenate([ga_rc.ravel(), ga_zs.ravel()])
 
-        # ascend L, projected so the ACTIVE constraints do not move.
-        # aspect is active whenever its violation is at/above the margin target;
-        # qi is active when it is within 20% of its bound.
-        d = gL.copy()
+        # Ascend the composite that acceptance actually scores.  The old loop
+        # projected away all active-margin motion, even though honest_score has
+        # an explicit exchange rate between L and the worst violation.
+        d = gL / 20.0
         active = []
-        if asp_v >= MARGIN_TARGET * 0.9 and np.linalg.norm(ga) > 0:
-            d = d - ga * float(d @ ga) / float(ga @ ga)
+        violations = np.asarray(m_cur["violations"], float)
+        worst = int(np.argmax(violations))
+        if violations[worst] > MARGIN_TARGET and worst == 0:
+            d -= MARGIN_SLOPE * ga
             active.append("aspect")
-        qi_v = m_cur["violations"][2]
-        if qi_v > -2e-3 and np.linalg.norm(gq) > 0:
-            d = d - gq * float(d @ gq) / float(gq @ gq)
+        elif violations[worst] > MARGIN_TARGET and worst == 2:
+            # qi violation normalizes log10(qi) by abs(-4).
+            d -= MARGIN_SLOPE * gq / 4.0
             active.append("qi")
+        elif violations[worst] > MARGIN_TARGET:
+            # We do not have complete iota/mirror/elongation boundary gradients.
+            # Conservatively hold the trustworthy active margins in this case.
+            rows = [v for v, on in ((ga, asp_v >= MARGIN_TARGET * 0.9),
+                                     (gq, violations[2] > -2e-3))
+                    if on and np.linalg.norm(v) > 0]
+            if rows:
+                A = np.vstack(rows)
+                lam, *_ = np.linalg.lstsq(A @ A.T, A @ d, rcond=None)
+                d -= A.T @ lam
+                active.extend(["fallback-projection"])
         if not np.abs(d).max():
             print("zero step direction — stopping", flush=True)
             break
@@ -200,7 +224,15 @@ def main() -> int:
         except Exception as e:
             m, err = None, f"{type(e).__name__}: {e}"[:100]
 
-        cur_h = st["trajectory"][-1]["honest"]
+        # The incumbent's score, NOT the last record's: after a rejection
+        # trajectory[-1] holds the REJECTED candidate, whose honest score is
+        # lower, and comparing against it accepts a regression on the next step
+        # (measured: step 8 replaced the step-6 incumbent with one 1.4e-4 worse,
+        # and st["boundary"] is the only copy). st["boundary"] always comes from
+        # step 0 or the last accepted step, so the baseline must too.
+        _inc = [r for r in st["trajectory"]
+                if r.get("accepted") or r["step"] == 0]
+        cur_h = _inc[-1]["honest"]
         if m is None:
             rec = {"step": step, "error": err, "trust": st["trust"],
                    "active": active}
@@ -219,6 +251,11 @@ def main() -> int:
             if h > cur_h:
                 st["boundary"] = cand
                 rec["accepted"] = True
+                # separate copy: state.json's boundary is overwritten in place,
+                # so a regression (or a bad resume) would otherwise lose the best
+                (out / "best_boundary.json").write_text(json.dumps(
+                    {"honest": h, "step": step, "feasibility": m["feasibility"],
+                     "boundary": cand}, indent=2))
             else:
                 st["trust"] /= 3.0
                 rec["accepted"] = False

@@ -108,15 +108,32 @@ def docker_image_ready(image: str, dockerfile: str | None = None,
 
 def run_python_docker(code: str, timeout: float = 30.0, mem_mb: int = 1024,
                       image: str = "python:3.13-slim",
-                      cpuset: str | None = None, cpus: int = 1) -> SandboxResult:
+                      cpuset: str | None = None, cpus: int = 1,
+                      extra_files: dict[str, str] | None = None) -> SandboxResult:
     """Run `code` as a python script in a throwaway container: no network, `cpus`
     CPUs (optionally pinned via `cpuset` for stable wall-clock budgets), memory cap.
-    Check docker_image_ready() first; a docker-level failure surfaces as rc != 0."""
+    Check docker_image_ready() first; a docker-level failure surfaces as rc != 0.
+
+    `extra_files` maps relative paths to file contents, written next to main.py in
+    the same read-only mount. main.py runs under `-I`, so /work is NOT on its
+    sys.path: a script that wants these must add it (or hand PYTHONPATH=/work to a
+    child process). Used by stellar_p2 to ship the diffscore package to the
+    gradient service; it stays out of the clean-room verify path."""
     tmp = tempfile.mkdtemp(prefix="evoh_")
     name = f"evoh-{os.path.basename(tmp)}"
     try:
         with open(os.path.join(tmp, "main.py"), "w") as f:
             f.write(code)
+        for rel, text in (extra_files or {}).items():
+            dest = os.path.join(tmp, rel)
+            if not os.path.realpath(dest).startswith(os.path.realpath(tmp) + os.sep):
+                raise ValueError(f"extra_files path escapes the sandbox: {rel}")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "w") as f:
+                f.write(text)
+        for root, dirs, _files in os.walk(tmp):
+            for d in dirs:
+                os.chmod(os.path.join(root, d), 0o755)
         os.chmod(tmp, 0o755)
         cmd = ["docker", "run", "--rm", "--name", name, "--network", "none",
                "--cpus", str(cpus), "--memory", f"{mem_mb}m", "--memory-swap", f"{mem_mb}m",

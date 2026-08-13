@@ -39,6 +39,11 @@ The fm handle (your only access to physics; every eval costs ~1.5 s CPU):
 - fm.seed_nae(aspect_ratio=, max_elongation=, rotational_transform=,
   mirror_ratio=, n_field_periods=, max_poloidal_mode=, max_toroidal_mode=)
   -> ~QI near-axis boundary dict (free, unmetered). The right seed family.
+- fm.seed_nae_axis(...same physical parameters..., torsion=,
+  max_poloidal_mode=3, max_toroidal_mode=3) -> independent near-axis boundary
+  with magnetic-axis torsion exposed rather than fixed to 1.33/aspect. Use this
+  for low-dimensional axis/boundary co-design; construction is free, every
+  resulting boundary still needs a fresh metered evaluation.
 - fm.seed_ellipse(aspect_ratio=, elongation=, rotational_transform=,
   n_field_periods=) -> rotating-ellipse boundary dict (free).
 - fm.seed_bank(i) -> boundary dict from a bank of PUBLIC leaderboard
@@ -147,6 +152,57 @@ that actually need them. Each call costs ~0.1-0.5 s of your CPU deadline on
 high-mode boundaries — batch your bookkeeping, don't call them per candidate in
 an inner loop of thousands.
 <!--/MARGIN-GRAD-->
+
+<!--SOLVE-GRAD-->
+SOLVER GRADIENTS — THE OBJECTIVE AND qi, w.r.t. THE BOUNDARY (2026-08-10, new):
+the aspect tools above give you the constraint that is easy and, on a polished
+boundary, usually NOT the one blocking you. These give you the two that are:
+the objective L-gradB itself, and qi.
+- fm.metric_grad(b, k=20, h=3e-5) -> dict, or None (reason in fm.last_error).
+  COSTS 2*k+1 EVALS (41 by default, ~12 minutes). It is not free and there is
+  no cheaper way: no adjoint exists, so the boundary derivative is finite
+  differences of the solver's output arrays, contracted against exact analytic
+  gradients of the metrics. Keys:
+    grad_L          d(L-gradB)/d(coeff)        <- the objective. Ascend this.
+    grad_qi         d(log10 qi)/d(coeff)
+    grad_aspect     d(aspect violation)/d(coeff)   (exact, came for free)
+    grad_elongation d(elongation)/d(coeff)         (axis frozen: a direction,
+                    not a prediction)
+    base            honest_score / L / feasibility / violations / qi / aspect
+    solves, trust, coeffs
+  Each gradient is {"r_cos": [[...]], "z_sin": [[...]]}, shaped like the
+  boundary, zero where symmetry pins a coefficient.
+- fm.grad_step(b, grad, cap=3e-5, novelty_weight=None) -> a new boundary that
+  ascends the SAME composite used for selection: L/20 minus the 0.92 penalty on
+  the currently worst violation above the margin target. For aspect and qi the
+  exact available gradient is used (including qi's /4 violation normalization);
+  unsupported active constraints fall back conservatively. Inside the novelty
+  ramp it also follows a scale-normalized bank-distance subgradient by default;
+  pass an explicit nonnegative novelty_weight to tune or disable that term.
+  Free. A proposal, not a result — fm.eval decides.
+
+THE STEP SIZE IS THE WHOLE GAME. Read this before choosing `cap`:
+the trust region is 3e-5 in max-coefficient distance, and it is MEASURED, not a
+safety margin. Predicted-vs-actual improvement is 0.99 at cap 3e-5 and -0.05 at
+1e-4 — one order larger and the step goes the WRONG WAY. The reason is the
+landscape, not the estimator: the objective is a min over a grid whose argmin
+switches under 1e-4 boundary steps. A previous campaign's writers used the
+aspect tool at caps of 2e-3 to 4e-3, which is 100x outside this region, and
+those runs never beat the boundary they started from. Do not reuse that habit
+here. If you want to move further, take MANY small steps and re-linearize —
+that is what a gradient is for — or take a big structural jump and stop
+pretending the gradient describes it.
+A working loop, if you want one: evaluate, metric_grad, grad_step at 3e-5,
+evaluate, keep it if honest_score rose, else halve the cap and retry. Six such
+steps took a champion boundary from honest 0.61996 to 0.62253 with every step
+accepted and the feasibility margin held to within 1e-4.
+BUDGET IT DELIBERATELY: at 41 evals a gradient, three re-linearizations are
+most of a 160-eval budget. Either raise your own eval efficiency elsewhere, or
+spend the gradient where it decides something — on the incumbent you actually
+intend to ship, not on every candidate you dream up. k selects how many
+coefficients are differentiated (the k largest free nonzero ones); a smaller k
+is a cheaper, blinder gradient, and the ones it drops are treated as zero.
+<!--/SOLVE-GRAD-->
 
 SHAPE NOVELTY, NOT JUST DISTANCE (2026-07-27): max-coefficient distance is a
 weak novelty test. The previous campaign's champion cleared the 1e-3 export ball

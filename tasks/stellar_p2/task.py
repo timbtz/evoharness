@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -59,13 +60,41 @@ if os.environ.get("STELLAR_NO_BANK") == "1":
 _SLACK = 240.0   # container start + jax import/JIT + the last in-flight eval
 # overshooting the CPU deadline + final re-score — high-mode (11,21) boundaries
 # take 12-27s per forward call, so every tail item is ~20x the mp=1 case
-_MEM_MB = 4096   # jax wants >= 2 GB; fork workers add ~0.5 GB each over COW
+_MEM_MB = int(os.environ.get("STELLAR_MEM_MB", "4096"))
+# jax wants >= 2 GB; fork workers add ~0.5 GB each over COW. Raise it for
+# STELLAR_FULL_GRAD runs: the gradient service is a second jax process alongside
+# the pool (the standalone polish loop was OOM-killed at 5 GB under box load).
+
+# Files shipped into the eval sandbox next to main.py, so the gradient service
+# and the Plan-2 jax ports are importable there (PYTHONPATH=/work in the child).
+# Read at launch, not at import: an edit to diffscore applies to the next run.
+_GRAD_SHIP = ("experiments/fd_qi_probe.py", "experiments/qi_polish.py",
+              "experiments/diffscore/__init__.py",
+              "experiments/diffscore/boundary_grad.py",
+              "experiments/diffscore/difftest.py",
+              "experiments/diffscore/qi_jax.py",
+              "experiments/diffscore/lgradb_jax.py",
+              "experiments/diffscore/margins_jax.py",
+              "experiments/diffscore/elongation_jax.py",
+              "experiments/diffscore/feasibility.py")
+
+
+def _grad_files() -> dict[str, str]:
+    """{relative path: source} for the sandbox mount. `experiments/__init__.py`
+    is synthesized: the repo relies on namespace packages, the sandbox should
+    not have to."""
+    root = _DIR.parent.parent
+    out = {"experiments/__init__.py": ""}
+    for rel in _GRAD_SHIP:
+        out[rel] = (root / rel).read_text()
+    return out
 
 # Plan-2 margin tools in the train template (exact aspect value + gradient +
 # margin walk, all eval-free). STELLAR_MARGIN_GRAD=0 = the A/B control arm:
 # the fm methods refuse AND the description section is stripped, so the control
 # writer is not told about a tool it does not have.
 _GRAD_DOC = ("<!--MARGIN-GRAD-->", "<!--/MARGIN-GRAD-->")
+_SOLVEGRAD_DOC = ("<!--SOLVE-GRAD-->", "<!--/SOLVE-GRAD-->")
 
 # boundaries at least this good (shaped) enter the persistent archive; anything
 # beating the archive's current best is always kept so a frontier trail exists
@@ -79,6 +108,7 @@ CFG = json.loads(__CFG__)  # JSON string literal: survives null/true/false
 from constellaration import forward_model as _fmod, initial_guess as _ig, problems as _problems
 from constellaration.geometry import surface_rz_fourier as _srf
 from constellaration.mhd import vmec_settings as _vs
+from constellaration.mhd import near_axis_configuration as _nac
 
 _P2 = _problems.SimpleToBuildQIStellarator()
 
@@ -329,8 +359,114 @@ def _aspect_walk(r_cos, z_sin, nfp, target, cap):
 '''
 exec(_GRAD_SRC)  # noqa: S102 — the golden tests check this exact source
 
+# ---- Plan-2/3 solver gradients: d(objective, qi)/d(boundary) --------------
+# The aspect gradient above is free because aspect is boundary-only. The two
+# metrics that actually bind — the L-gradB objective and qi — live downstream of
+# the equilibrium, so their boundary gradient needs d(solver output)/d(boundary),
+# which no adjoint provides yet: it is finite differences at 2 solves per
+# coefficient, contracted against Plan-2's analytic downstream gradients. That
+# computation is `experiments/diffscore/boundary_grad.py`, shipped into the
+# sandbox (extra_files) and run as a CHILD process — jax must never initialize in
+# this parent, which forks the eval pool (see _GRAD_SRC).
+# Kill-switch: STELLAR_FULL_GRAD (default off; =1 arms the tools and the docs).
+_SOLVEGRAD_SRC = '''
+import os as _os, subprocess as _sp
+_GRAD_SERVICE = "/work/experiments/diffscore/boundary_grad.py"
+
+def _gflat(g):
+    return np.concatenate([np.asarray(g["r_cos"], float).ravel(),
+                           np.asarray(g["z_sin"], float).ravel()])
+
+def _grad_step_vec(g, cap, target, novelty_grad=None, novelty_weight=0.0):
+    """Ascend the score that is actually selected: honest score plus novelty.
+
+    For the two constraints with trustworthy solver derivatives this is
+    dL/20 - .92*d(max_violation) above the margin target.  If another constraint
+    is the maximum, retain the conservative projection rule until its complete
+    boundary derivative exists.  `novelty_grad` is an optional subgradient of
+    bank distance; a positive weight walks out of the public-seed ball.
+    Returns (step_vector, active_names).
+
+    The projection is JOINT, not one constraint after another: with both active,
+    the polish loop's sequential Gram-Schmidt reprojects the step off aspect and
+    then off qi, and the second pass silently reintroduces an aspect component.
+    Solving the small Gram system A A^T lam = A d instead makes the step
+    orthogonal to all of them at once, which is what "hold the margins" meant.
+    First order only either way — the constraints still curve, so the caller
+    re-evaluates."""
+    d = _gflat(g["grad_L"]) / 20.0
+    viol = np.asarray(g["base"]["violations"], float)
+    worst = int(np.argmax(viol))
+    active = []
+    if max(0.0, float(viol[worst])) > target:
+        if worst == 0 and "grad_aspect" in g:
+            d -= 0.92 * _gflat(g["grad_aspect"])
+            active.append("aspect")
+        elif worst == 2 and "grad_qi" in g:
+            # violation=(log10(qi)-(-4))/abs(-4), while grad_qi is dlog10(qi).
+            d -= 0.92 * _gflat(g["grad_qi"]) / 4.0
+            active.append("qi")
+        else:
+            # iota/mirror and full elongation boundary gradients are unavailable.
+            # Do not pretend the partial gradient is the composite objective.
+            rows = []
+            for key, on in (("grad_aspect", viol[0] >= target * 0.9),
+                            ("grad_qi", viol[2] > -2e-3)):
+                if key in g and on:
+                    v = _gflat(g[key])
+                    if float(v @ v) > 0.0:
+                        rows.append(v); active.append(key.replace("grad_", ""))
+            if rows:
+                A = np.vstack(rows)
+                lam, *_ = np.linalg.lstsq(A @ A.T, A @ d, rcond=None)
+                d -= A.T @ lam
+    if novelty_grad is not None and novelty_weight:
+        d += float(novelty_weight) * np.asarray(novelty_grad, float)
+        active.append("novelty")
+    big = float(np.abs(d).max())
+    if not big:
+        return None, active
+    return d / big * float(cap), active
+
+def _bank_subgrad(boundary):
+    """Active-branch subgradient of scale-normalized L-inf bank distance.
+
+    Includes the derivative through division by the candidate's R0.  At nearest
+    seed / maximum-coordinate ties this deterministically chooses one valid
+    subgradient branch, which is sufficient for a re-linearized trust walk.
+    """
+    rc = np.asarray(boundary["r_cos"], float); zs = np.asarray(boundary["z_sin"], float)
+    sidx = (0, rc.shape[1] // 2); scale = rc[sidx] if rc[sidx] > 0.1 else 1.0
+    best = None
+    for e in CFG.get("seed_bank", []):
+        bb = e["boundary"]
+        if bb.get("n_field_periods") != boundary.get("n_field_periods"): continue
+        br = np.asarray(bb["r_cos"], float); bz = np.asarray(bb["z_sin"], float)
+        bs = br[0, br.shape[1] // 2]; bs = bs if bs > 0.1 else 1.0
+        shape = (max(rc.shape[0], br.shape[0]), max(rc.shape[1], br.shape[1]))
+        def pad(a):
+            out=np.zeros(shape); off=(shape[1]-a.shape[1])//2
+            out[:a.shape[0], off:off+a.shape[1]]=a; return out, off
+        cr, roff=pad(rc/scale); cz, zoff=pad(zs/scale)
+        sr,_=pad(br/bs); sz,_=pad(bz/bs)
+        blocks=(cr-sr, cz-sz); d=max(np.abs(x).max() for x in blocks)
+        if best is None or d < best[0]: best=(d, blocks, roff, zoff)
+    if best is None: return None, None
+    d, blocks, roff, zoff = best
+    block = 0 if np.abs(blocks[0]).max() >= np.abs(blocks[1]).max() else 1
+    ij = np.unravel_index(np.abs(blocks[block]).argmax(), blocks[block].shape)
+    sign = float(np.sign(blocks[block][ij])); gr=np.zeros_like(rc); gz=np.zeros_like(zs)
+    off = roff if block == 0 else zoff; local=(ij[0], ij[1]-off)
+    arr = rc if block == 0 else zs
+    if 0 <= local[0] < arr.shape[0] and 0 <= local[1] < arr.shape[1]:
+        (gr if block == 0 else gz)[local] = sign / scale
+        if scale != 1.0:
+            gr[sidx] -= sign * arr[local] / scale**2
+    return d, np.concatenate([gr.ravel(), gz.ravel()])
+'''
+
 # ---- optimizer-run template: candidate code + metered fm handle ------------
-_TEMPLATE = _PRELUDE + _HOTPATCH + _GRAD_SRC + '''
+_TEMPLATE = _PRELUDE + _HOTPATCH + _GRAD_SRC + _SOLVEGRAD_SRC + '''
 def _worker(job):
     """One forward eval in a pool worker; never raises.
     job = (boundary, fid, strict) — strict is the final authoritative re-score:
@@ -456,6 +592,29 @@ class _FM:
         return float(metrics["shaped_score"]) if metrics else float("-inf")
     def seed_nae(self, **kw):
         return _bdict(_ig.generate_nae(**kw))
+    def seed_nae_axis(self, *, aspect_ratio, max_elongation,
+                      rotational_transform, mirror_ratio, torsion,
+                      n_field_periods, max_poloidal_mode=3,
+                      max_toroidal_mode=3):
+        """Independent near-axis construction with axis torsion exposed.
+
+        Unlike seed_nae, this does not hardcode torsion=1.33/aspect. It co-designs
+        the optimized near-axis geometry and finite-radius boundary, then applies
+        an explicit spectral continuation level. Free; evaluation is still metered.
+        """
+        config = _nac.generate(
+            mirror_ratio=float(mirror_ratio),
+            min_iota=float(rotational_transform),
+            max_elongation=float(max_elongation),
+            torsion=float(torsion),
+            n_field_periods=int(n_field_periods), major_radius=1.0,
+            max_toroidal_mode=max(3, int(max_toroidal_mode)))
+        boundary = _nac.near_axis_configuration_to_plasma_boundary(
+            config, _nac.NearAxisToPlasmaBoundarySettings(
+                minor_radius=1.0 / float(aspect_ratio)))
+        boundary = _nac.smooth_and_set_max_mode_numbers(
+            boundary, int(max_poloidal_mode), int(max_toroidal_mode))
+        return _bdict(boundary)
     def seed_ellipse(self, **kw):
         return _bdict(_ig.generate_rotating_ellipse(**kw))
     def seed_bank_info(self):
@@ -508,6 +667,90 @@ class _FM:
     def _grad_on(self):
         if not CFG.get("margin_grad"):
             raise RuntimeError("margin-gradient tools are disabled for this run")
+    # ---- solver gradients: the objective and qi, w.r.t. the boundary --------
+    def metric_grad(self, boundary, k=20, h=3e-5, fidelity=None, want=None):
+        """d(L-gradB)/d(coeff) and d(log10 qi)/d(coeff) at `boundary`, plus the
+        free exact aspect gradient and the (axis-frozen) elongation gradient.
+
+        COSTS 2*k+1 EVALS — 41 at the default k=20, about 12 minutes. This is the
+        real price of a gradient without an adjoint; budget for it deliberately.
+        Returns None on failure with the reason in fm.last_error. The result is
+        valid only within ~3e-5 in max-coefficient distance (result["trust"]):
+        one order larger and the step direction inverts, measured.
+
+        Keys: grad_L, grad_qi, grad_aspect, grad_elongation (each {"r_cos",
+        "z_sin"}), base (honest_score/L/feasibility/violations/qi/aspect),
+        solves, trust, coeffs (which coefficients were differentiated)."""
+        self._solve_grad_on()
+        k = max(1, int(k))
+        cost = 2 * k + 1
+        if self.remaining() < cost:
+            self.last_error = ("metric_grad needs %d evals, %d left"
+                               % (cost, max(self.remaining(), 0)))
+            return None
+        left = CFG["cpu_budget"] - (time.monotonic() - _T0)
+        if left < 90.0:
+            self.used = CFG["max_evals"]
+            self.last_error = "cpu budget exhausted"
+            return None
+        self.used += cost          # charged up front: the solves happen regardless
+        req = json.dumps({"boundary": boundary, "k": k, "h": float(h),
+                          "fidelity": fidelity or CFG["fidelity"],
+                          "want": list(want or ("L", "qi", "aspect", "elongation"))})
+        env = dict(_os.environ, PYTHONPATH="/work")
+        try:
+            p = _sp.run([sys.executable, _GRAD_SERVICE], input=req, env=env,
+                        capture_output=True, text=True, timeout=max(60.0, left - 30.0))
+        except _sp.TimeoutExpired:
+            self.last_error = "metric_grad timed out (raise cpu_budget or lower k)"
+            return None
+        except Exception as e:
+            self.last_error = "metric_grad failed: %s: %s" % (type(e).__name__, e)
+            return None
+        lines = [ln for ln in (p.stdout or "").strip().splitlines() if ln.strip()]
+        try:
+            g = json.loads(lines[-1])
+        except Exception:
+            self.last_error = ("metric_grad produced no result: %s"
+                               % ((p.stderr or "")[-300:] or "empty output"))
+            return None
+        if not g.get("ok"):
+            self.last_error = "metric_grad: %s" % g.get("error", "unknown error")
+            return None
+        return g
+    def grad_step(self, boundary, grad, cap=3e-5, novelty_weight=None):
+        """Boundary moved one projected gradient step (free, no evals): ascend the
+        objective, projected orthogonal to whichever constraints are active so the
+        margins hold, capped at `cap` in max-coefficient distance. `grad` is a
+        metric_grad result. This is exactly the step rule the standalone polish
+        loop takes; its measured trust region is 3e-5 and the caller is expected
+        to re-evaluate — a step is a proposal, not a result."""
+        self._solve_grad_on()
+        if not grad or "grad_L" not in grad:
+            self.last_error = "grad_step needs a metric_grad result with grad_L"
+            return None
+        bd, ng = _bank_subgrad(boundary)
+        if novelty_weight is None:
+            novelty_weight = (CFG.get("novelty_pen", 0.05) /
+                              CFG.get("novelty_min", 1e-3)
+                              if bd is not None and bd < CFG.get("novelty_min", 1e-3)
+                              else 0.0)
+        step, active = _grad_step_vec(grad, cap, CFG["margin_target"], ng,
+                                      novelty_weight)
+        if step is None:
+            self.last_error = "grad_step: zero step direction (active=%s)" % active
+            return None
+        rc = np.asarray(boundary["r_cos"], float)
+        zs = np.asarray(boundary["z_sin"], float)
+        mr, mz = _free_mask(rc, zs)
+        b = json.loads(json.dumps(boundary))
+        b["r_cos"] = (rc + step[:rc.size].reshape(rc.shape) * mr).tolist()
+        b["z_sin"] = (zs + step[rc.size:].reshape(zs.shape) * mz).tolist()
+        return b
+    def _solve_grad_on(self):
+        if not CFG.get("full_grad"):
+            raise RuntimeError("solver-gradient tools (metric_grad/grad_step) are "
+                               "disabled for this run")
     def bank_dist(self, boundary):
         """Max-coefficient distance to the closest same-nfp bank seed (padded
         canvas) — the export guard's + harness novelty penalty's exact metric.
@@ -723,15 +966,17 @@ def _novelty_shape(res: EvalResult, d: float | None) -> EvalResult:
 
 
 def _runner(script: str, timeout: float = 30.0, mem_mb: int = _MEM_MB,
-            cpus: int = 1):
+            cpus: int = 1, extra_files: dict[str, str] | None = None):
     if not docker_image_ready(_IMAGE, _DOCKERFILE, str(_DIR)):
         return None  # constellaration only exists in the image: no local fallback
-    res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpus=cpus)
+    res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpus=cpus,
+                            extra_files=extra_files)
     if "Unable to find image" in (res.stderr or ""):
         from core import sandbox  # image pruned externally: rebuild once, retry
         sandbox._DOCKER_READY.pop(_IMAGE, None)
         if docker_image_ready(_IMAGE, _DOCKERFILE, str(_DIR)):
-            res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpus=cpus)
+            res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpus=cpus,
+                                    extra_files=extra_files)
     return res
 
 
@@ -780,10 +1025,16 @@ def _description() -> str:
     section documenting them is stripped, so the A/B control run is neither
     given the tool nor told it exists."""
     text = (_DIR / "description.md").read_text()
+
+    def strip(t: str, marks: tuple[str, str]) -> str:
+        head, _, rest = t.partition(marks[0])
+        return head + rest.partition(marks[1])[2]
+
+    if os.environ.get("STELLAR_FULL_GRAD", "0") == "0":
+        text = strip(text, _SOLVEGRAD_DOC)     # default: tools off, docs absent
     if os.environ.get("STELLAR_MARGIN_GRAD", "1") != "0":
         return text
-    head, _, rest = text.partition(_GRAD_DOC[0])
-    return head + rest.partition(_GRAD_DOC[1])[2]
+    return strip(text, _GRAD_DOC)
 
 
 class _StellarP2Task:
@@ -797,6 +1048,55 @@ class _StellarP2Task:
         self._bcache: dict[str, dict] = {}   # code sha -> returned boundary
         self._arch_keys: set[str] | None = None
         self._arch_best = float("-inf")
+
+    def experiment_spec(self) -> dict:
+        """Effective evaluator settings, including import-time environment overrides."""
+        env_defaults = {
+            "STELLAR_TRAIN_OVERRIDES": "{}",
+            "STELLAR_NO_BANK": "0",
+            "STELLAR_MEM_MB": "4096",
+            "STELLAR_HOT_RESTART": "1",
+            "STELLAR_SOFT_FAIL": "1",
+            "STELLAR_HOT_RESTART_MODE": "single_stage",
+            "STELLAR_HOT_RESTART_TOL": "1e-3",
+            "STELLAR_SOFT_FAIL_NITER": "5000",
+            "STELLAR_MARGIN_GRAD": "1",
+            "STELLAR_FULL_GRAD": "0",
+            "STELLAR_NOVELTY": "{}",
+            "STELLAR_MARGIN": "{}",
+        }
+        try:
+            inspected = subprocess.run(
+                ["docker", "image", "inspect", "--format={{.Id}}", _IMAGE],
+                capture_output=True, text=True, timeout=5)
+            image_id = inspected.stdout.strip() if inspected.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            image_id = None
+        return {
+            "evaluator": {
+                "package": "constellaration",
+                "docker_image": _IMAGE,
+                "docker_image_id": image_id,
+                "dockerfile_sha256": hashlib.sha256(
+                    Path(_DOCKERFILE).read_bytes()).hexdigest(),
+            },
+            "fidelities": {**_FIDELITY, "private": "official"},
+            "evaluation_budget": {**_TRAIN, "memory_mb": _MEM_MB,
+                                  "host_timeout_slack": _SLACK},
+            "scoring": {
+                "margin": dict(_MARGIN),
+                "novelty": dict(_NOVELTY),
+                "export_min_bank_distance": _EXPORT_MIN,
+            },
+            "environment": {key: os.environ.get(key, default)
+                            for key, default in env_defaults.items()},
+            "seed_bank": {
+                "mode": "disabled" if not _BANK else "available",
+                "count": len(_BANK),
+                "sha256": hashlib.sha256(_BANK_FILE.read_bytes()).hexdigest()
+                if _BANK_FILE.exists() else None,
+            },
+        }
 
     def seed_code(self) -> str:
         from tasks.stellar_p2.seed import seed_code
@@ -879,6 +1179,8 @@ class _StellarP2Task:
         cfg = {**_TRAIN, "fidelity": _FIDELITY["train"],
                "margin_target": _MARGIN["target"],
                "margin_slope": _MARGIN["slope"],
+               "novelty_min": _NOVELTY_MIN,
+               "novelty_pen": _NOVELTY_PEN,
                "slack": _SLACK,   # container's own deadline = cpu_budget + this
                # Plan 1 eval-efficiency knobs (read per call so kill-switches
                # work without a reimport): STELLAR_HOT_RESTART=0 / _SOFT_FAIL=0
@@ -894,6 +1196,9 @@ class _StellarP2Task:
                # Plan-2 exact aspect gradient handed to candidate code (the
                # description section is gated at import; this flag per call)
                "margin_grad": os.environ.get("STELLAR_MARGIN_GRAD", "1") != "0",
+               # Solver gradients (objective + qi) via the shipped service.
+               # Default OFF: every existing config stays byte-identical.
+               "full_grad": os.environ.get("STELLAR_FULL_GRAD", "0") != "0",
 
                "seed_bank": [{"boundary": e["boundary"],
                               "score": e["official_score"],
@@ -901,8 +1206,9 @@ class _StellarP2Task:
                              for e in _BANK]}
         script = _TEMPLATE.replace("__CODE__", repr(code)).replace(
             "__CFG__", repr(json.dumps(cfg)))
+        ship = _grad_files() if cfg["full_grad"] else None
         timeout = cfg["cpu_budget"] + _SLACK
-        r = _runner(script, timeout=timeout, cpus=cfg["workers"])
+        r = _runner(script, timeout=timeout, cpus=cfg["workers"], extra_files=ship)
         if r is None:
             return EvalResult(float("-inf"), error="docker image unavailable "
                               f"(build {_IMAGE} from {_DOCKERFILE})")

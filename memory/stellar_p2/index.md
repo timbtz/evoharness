@@ -24,6 +24,7 @@ Second, honesty-preserving leaderboard to track from now on: **best official sco
 - gaussian-spectral-noise.md — Random Gaussian noise disrupts QI balance without unlocking valid novelty.
 - hardcoded-incorrect-escape.md — Hardcoding an inferior B3 escape matrix caps the score below the winner.
 - spsa-ascent.md — Iterative nevergrad/SPSA/coordinate-descent ascent starves the eval budget and times out.
+- solver-gradient-ascent.md — `fm.metric_grad` + `fm.grad_step` micro-perturbations fail to provide structural gains on nfp=3 isolated boundaries.
 - m1-selective-contraction.md — m=1-row-selective differential scaling disrupts geometry and fails to beat the incumbent.
 - top-bank-anisotropic-escape.md — `exp(-a*m - b*|n|)` scaling on the top bank seed collapses to the floor.
 - mode-grafting-and-blends.md — Cross-basin/cross-nfp recombination and same-nfp homotopy regress.
@@ -32,14 +33,14 @@ Second, honesty-preserving leaderboard to track from now on: **best official sco
 - b4-truncation-and-bank-escapes.md — Structural truncation, homotopy, and envelope escapes on B4/bank seeds collapse or time out.
 - surrogate-and-nae-escapes.md — Batched quadratic surrogate steps and NAE-from-scratch basins fall back to the floor.
 - toroidal-axis-contraction.md — Orthogonal n-axis, combined (m,n), m-gated n-axis, or `exp(-q|n|)` toroidal scaling disrupts geometry.
-- spectral-and-depth-perturbations.md — Mid-m bumps, asymmetric base splits, and custom LF-gated loops plateau or timeout.
+- spectral-and-depth-perturbations.md — Mid-m bumps, asymmetric base splits, additive spectral bumps, and custom LF-gated loops plateau or timeout.
 - b1-power-law-contraction.md — Nonlinear power-law profiles, additive high-m bands, and fabricated matrices plateau or crash.
 - risoliao6-basin-extension.md — Extending the R/Z contraction sweep to structurally distinct bank seeds plateaus immediately.
 - structural-axis-perturbations.md — Radial translation, independent NAE basins, and iterative coordinate descent fail or starve budget.
 - per-row-rz-and-3d-joint-sweeps.md — Per-row R/Z gradients, angular twists, stage-split cr variations, and multi-round joint 3D grids regress or time out.
 - r0-rescale.md — Uniform major-radius (R0) rescale pre-contraction regresses by breaking aspect/QI coupling.
 - m-transfer.md — Post-composition low-m to high-m zero-sum curvature transfer yields no gain over the optimal two-stage composition.
-- m-dependent-cr-cz-ratio.md — Making the cr/cz decoupling ratio a function of poloidal mode `m` destroys global aspect coordination.
+- m-dependent-cr-cz-ratio.md — Making the cr/cz decoupling ratio a function of poloidal mode `m` or asymmetric stages destroys global aspect coordination.
 - b6-nae-independent-pivot.md — Parameterized nfp=3 NAE seed sweeps lack baseline L and collapse to the incumbent.
 - warm-ladder-and-soft-fail-cliff-walking.md — Merged into surrogate-and-nae-escapes.md.
 - plan1-deep-s5-85591679.md — Isolated state traps: recombination, per-row grafting, acceptance-key tweaks, warm-ladder depth sweeps, interleaved dual-seed ladders, chained multi-parameter ladders, adaptive coordinate walkers, 3D grids, and global scaling on dynamic bank seeds fail to recover baseline L (capped at 0.6158).
@@ -49,10 +50,20 @@ Second, honesty-preserving leaderboard to track from now on: **best official sco
 - stellar_p2-s202-55112695.md — Silent typos, exhausted stage-1/2 grids, dynamic bank seed drops, and an nfp=2 NAE timeout trap the run.
 - stellar_p2-s204-63425638.md — Dynamic bank seed contraction, NAE nfp=2 pivots, coordinate ascent, adaptive stochastic ascent, m=0 phase shifts, BDC scaling, and hardcoded approximations cap the isolated run at 0.5835.
 - stellar_p2-s205-85293087.md — Isolated state traps, fabricated low-mode boundary matrices, bank seed contraction caps, axisymmetric perturbations, spectral frequency-reweighting, and nfp=2→3 rescaling fail to recover baseline L, capping run at 0.5783.
-- stellar_p2-s206-7458085.md — Isolated state traps without hardcoded matrix: spectral shifts, n-axis tapering, blends, multi-seed portfolios, hardcoded (8,7) approximations, shear, and rotation all cap the run at 0.581.
+- stellar_p2-s206-7450085.md — Isolated state traps without hardcoded matrix: spectral shifts, n-axis tapering, blends, multi-seed portfolios, hardcoded (8,7) approximations, shear, and rotation all cap the run at 0.581.
 - stellar_p2-s207-18745292.md — Independent basins from NAE/ellipse seeds lack baseline objective_L and fail to achieve feasibility (capped at -0.83 score).
 - independent-basin-violation-descent.md — Structural contraction, coordinate-axis, SPSA, forward-probe, and physics-first constraint-targeted transforms on NAE seeds strictly increase constraint violations, failing to bridge the gap to feasibility.
 - plan1-deep-s7-85609652.md — Iterative walkers, nfp=2 NAE probes, multi-anchor portfolios, fidelity-gated grids, warm-ladders, and structural interpolations trap the isolated run at 0.6160, capped by missing baseline objective_L.
+- push-margin-and-ladder-variants.md — push run: `fm.margin_step` orthogonal projections and sequential warm-ladders fail to beat the B3 contraction grid, often yielding pathological boundaries.
+- push-saturated-grid-rearrangements.md — push run: Stage composites, d-term distortions, and static grid parameter rearrangements simply saturate at the isolated B3 train floor.
+- push-bank-and-harmonic-escapes.md — push run: Dynamic bank seed retrieval and toroidal second-harmonic structural escapes regress and disrupt QI geometry.
+- warm-eval-and-soft-fail-cliff-walking.md — Sequential warm-ladders (≤1e-3 steps), graded soft-fail cliff bisection, and mid-point grid interpolation fail to outperform batched static grids and often select pathological boundaries.
+- stellar_p2-p3-on-isolated-basin.md — p3-on: Without the authentic B3-lhhhhappy3 matrix, this run caps at 0.5830. `fm.margin_step`, orthogonal walks, ternary depth searches, split-rate differentials, multi-bank portfolios, and NAE probes all fail.
+- g2-window-s100-to-c0049.md — g2 run: Isolated state traps, 3-stage mixed-curvature, cosh-shear, aspect-prescreening, and sequential warm-ladders fail to recover baseline L, capping run at 0.5843.
+- g3-isolated-contraction-sweeps.md — g3 run: Dense contraction sweeps and gradient walks on a fabricated minimal B3 matrix are capped at 0.5843 due to structural baseline deficits.
+- g3-pipeline-restructures-and-crashes.md — g3 run: Streamlined single-seed pipelines lose safety nets and trigger -1.0873 validation crashes.
+- g3-structural-and-spectral-perturbations.md — g3 run: Toroidal weight shifts, negative curvature stages, and nfp=2 NAE probes bounce off the structural physics cap of the isolated matrix.
+- g3-bank-seed-and-margin-traps.md — g3 run: Dynamic bank seed retrieval and metric_grad games fail to recover the authentic baseline objective_L.
 
 ## performance-analysis
 - feasibility-tolerance-economics.md — the official rule (`_DEFAULT_RELATIVE_TOLERANCE = 0.01`, max of 5 normalized violations, aspect ratio always binding) and the ~0.92 score-per-feasibility exchange rate.

@@ -24,6 +24,7 @@ from axes.roles import SingleStrong, SplitRoles
 from axes.search import Greedy11, Islands, Staged
 from core.candidate import Candidate, Pool, PromptSection
 from core.config import Config
+from core.experiment import ExperimentSpec
 from core.ledger import BudgetExceeded, BudgetGuard, Ledger
 from core.llm import LLM, parse_code, parse_idea, parse_prediction, parse_reasoning
 
@@ -179,6 +180,9 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     task = load_task(cfg.task)
     run_dir = Path(run_dir or _ROOT / "runs" / f"{cfg.task}-{cfg.seed}-{int(time.time())}")
     ledger = Ledger(run_dir)
+    spec = ExperimentSpec.capture(cfg, task, _ROOT)
+    ledger.append({"type": "run_start", "config": cfg.to_dict(),
+                   "run_dir": str(run_dir), "experiment_spec": spec.to_dict()})
     guard = BudgetGuard(**cfg.budget)
     llm = llm_factory(ledger, guard)
     rng = random.Random(cfg.seed)
@@ -216,8 +220,6 @@ def run(cfg: Config, run_dir: str | Path | None = None, llm_factory=LLM) -> dict
     getattr(ax["feedback"], "bind", lambda *a: None)(run_dir, ledger)
     getattr(ax["knowledge"], "bind", lambda *a: None)(
         task, llm, ax["roles"], cfg.temperatures, ledger)
-    ledger.append({"type": "run_start", "config": cfg.to_dict(), "run_dir": str(run_dir)})
-
     pool = Pool()
     seed_src, seed_meta = task.seed_code(), {"gen": 0, "seed": True}
     if cfg.resume_from:
