@@ -69,6 +69,55 @@ def expand_grid(boundary: dict, max_m: int, max_n: int) -> dict:
     return _boundary_like(boundary, rr, zz)
 
 
+def dilate(boundary: dict, radial_scale: float, vertical_scale: float,
+           mode_decay: float = 0.0) -> dict:
+    """Coordinated R/Z shaping scale, major radius fixed, decayed by order.
+
+    Not generic coefficient scaling: (m, n) = (0, 0) is pinned, so this moves
+    aspect ratio and elongation together along a physical axis instead of
+    rescaling the whole torus."""
+    if not (.5 <= radial_scale <= 2.) or not (.5 <= vertical_scale <= 2.):
+        raise ValueError("structural dilation scales must lie in [0.5, 2.0]")
+    if not (0. <= mode_decay <= 1.):
+        raise ValueError("mode decay must lie in [0, 1]")
+    rc, zs = _arrays(boundary)
+    center = (rc.shape[1] - 1) // 2
+    for m in range(rc.shape[0]):
+        for j in range(rc.shape[1]):
+            n = j - center
+            if m == 0 and n == 0:
+                continue
+            damp = (1. - mode_decay) ** max(0, m + abs(n) - 1)
+            rc[m, j] *= 1. + (radial_scale - 1.) * damp
+            zs[m, j] *= 1. + (vertical_scale - 1.) * damp
+    return _boundary_like(boundary, rc, zs)
+
+
+def reconstruct(boundary: dict, core_m: int, core_n: int, amplitude: float,
+                phase_seed: int) -> dict:
+    """Truncate to the structural core, then REBUILD the discarded shell.
+
+    Plan family 6: the point is to keep the core and re-derive the high modes
+    through continuation rather than copy them, so the result is not a
+    perturbation of the source spectrum."""
+    if amplitude <= 0 or amplitude > .05:
+        raise ValueError("structural band amplitude must be in (0, .05]")
+    core = truncate(boundary, core_m, core_n)
+    rc, zs = _arrays(core)
+    center = (rc.shape[1] - 1) // 2
+    rng = np.random.default_rng(phase_seed)
+    scale = float(rc[0, center])
+    for m in range(rc.shape[0]):
+        for j in range(rc.shape[1]):
+            n = j - center
+            if (m <= core_m and abs(n) <= core_n) or (m == 0 and n <= 0):
+                continue
+            amp = amplitude * scale / max(1, m + abs(n))
+            sign = -1. if rng.integers(2) else 1.
+            rc[m, j], zs[m, j] = sign * amp, -sign * amp
+    return _boundary_like(core, rc, zs)
+
+
 @dataclass(frozen=True)
 class ModeBand:
     max_m: int

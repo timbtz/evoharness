@@ -6,10 +6,12 @@ import atexit
 import json
 import os
 import sys
+import re
 import tempfile
 import time
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -103,7 +105,65 @@ def design(seed: int, per_arm: int, nae_mode: int = 2,
     return jobs
 
 
-def candidate_code(spec: OperatorSpec) -> str:
+TRANSFORM_FAMILIES = ("truncation_reconstruction", "structural_dilation",
+                      "mode_continuation")
+TRANSFORM_SCHEMA = {
+    "truncation_reconstruction": {"core_poloidal_mode", "core_toroidal_mode",
+                                  "band_amplitude", "phase_seed"},
+    "structural_dilation": {"radial_scale", "vertical_scale", "mode_decay"},
+    "mode_continuation": {"max_poloidal_mode", "max_toroidal_mode",
+                          "band_amplitude", "phase_seed"}}
+
+
+def apply_transform(spec: OperatorSpec, source: dict) -> dict:
+    """Run a transform family on the host: pure Fourier algebra, no physics.
+
+    The sandbox mounts one file, so the candidate cannot import
+    core.stellar_operators. Transforming here (and shipping the resulting
+    boundary as a literal) keeps the operator deterministic, reviewable, and
+    geometry-screened before it costs a solve."""
+    from core.stellar_operators import (ModeBand, activate_band, dilate,
+                                        geometry_screen, reconstruct)
+    p = spec.parameters
+    expected = TRANSFORM_SCHEMA.get(spec.family)
+    if expected is None:
+        raise ValueError(f"transform executor does not support {spec.family!r}")
+    if set(p) != expected:
+        raise ValueError(f"{spec.family} parameters must be exactly {sorted(expected)}")
+    if spec.family == "truncation_reconstruction":
+        out = reconstruct(source, int(p["core_poloidal_mode"]),
+                          int(p["core_toroidal_mode"]),
+                          float(p["band_amplitude"]), int(p["phase_seed"]))
+    elif spec.family == "structural_dilation":
+        out = dilate(source, float(p["radial_scale"]), float(p["vertical_scale"]),
+                     float(p["mode_decay"]))
+    else:
+        out = activate_band(source, ModeBand(int(p["max_poloidal_mode"]),
+                                             int(p["max_toroidal_mode"]),
+                                             float(p["band_amplitude"]),
+                                             int(p["phase_seed"])))
+    ok, why = geometry_screen(out)
+    if not ok:
+        raise ValueError(f"transform produced an invalid boundary: {why}")
+    return out
+
+
+def candidate_code(spec: OperatorSpec, source: dict | None = None) -> str:
+    if spec.family in TRANSFORM_FAMILIES:
+        if source is None:
+            raise ValueError(f"{spec.family} requires a source boundary")
+        boundary = apply_transform(spec, source)
+        return f'''def solve(fm, rng):
+    # Host-transformed basin, one fresh screen, no incumbent fallback.
+    boundary = {boundary!r}
+    aspect = fm.aspect(boundary)
+    if not (4.0 <= aspect <= 14.0):
+        raise RuntimeError("geometry screen rejected aspect %.6g" % aspect)
+    metrics = fm.eval(boundary)
+    if metrics is None or metrics.get("soft_fail"):
+        raise RuntimeError("fresh VLF screen failed: %s" % fm.last_error)
+    return boundary
+'''
     methods = {"nae": "seed_nae", "nae_axis": "seed_nae_axis", "ellipse": "seed_ellipse"}
     if spec.family not in methods:
         raise ValueError(f"construction executor does not support {spec.family!r}")
@@ -166,7 +226,47 @@ def retryable(error: str | None) -> bool:
                                                "connection reset", "oom"))
 
 
-def load_operator_specs(path: Path) -> tuple[list[OperatorSpec], list[dict]]:
+_FSQ = re.compile(r"fsqr=(\S+) fsqz=(\S+) fsql=(\S+)\)")
+
+
+def near_converged(error: str | None, tolerance: float = 1e-4) -> bool:
+    """True when a screen soft-failed with a residual this close to ftol.
+
+    Such a start was cut off by the soft-fail iteration cap, not diverged: 41
+    of 49 recorded screen failures sat under 1e-4, and re-running the four
+    closest at the full vlf niter recovered three of them
+    (runs/screen-niter-probe/report.json, 2026-08-13). Escalating them is the
+    difference between a physical verdict and a budget artifact."""
+    found = _FSQ.search(error or "")
+    return bool(found) and max(float(g) for g in found.groups()) < tolerance
+
+
+def evaluate_spec(task, spec: OperatorSpec, source: dict | None, retries: int,
+                  screen_niter: int, base_niter: str) -> tuple[Any, list[str], bool]:
+    """Screen one start, escalating a near-converged soft-fail to the full
+    iteration cap. Returns (result, errors, escalated)."""
+    result, errors = None, []
+    for _ in range(retries + 1):
+        result = task.evaluate(candidate_code(spec, source), "train")
+        if not result.error:
+            return result, errors, False
+        errors.append(result.error)
+        if not retryable(result.error):
+            break
+    if not near_converged(errors[-1] if errors else None):
+        return result, errors, False
+    os.environ["STELLAR_SOFT_FAIL_NITER"] = str(screen_niter)
+    try:                       # cfg is rebuilt per evaluate, so this is per call
+        result = task.evaluate(candidate_code(spec, source), "train")
+    finally:
+        os.environ["STELLAR_SOFT_FAIL_NITER"] = base_niter
+    if result.error:
+        errors.append(result.error)
+    return result, errors, True
+
+
+def load_operator_specs(path: Path,
+                        source: dict | None = None) -> tuple[list[OperatorSpec], list[dict]]:
     payload = json.loads(path.read_text())
     rows = payload.get("accepted")
     if not isinstance(rows, list):
@@ -178,7 +278,7 @@ def load_operator_specs(path: Path) -> tuple[list[OperatorSpec], list[dict]]:
             raise ValueError("accepted entry lacks operator")
         try:
             spec = OperatorSpec(**raw)
-            candidate_code(spec)  # fail before any physics if it is not executable
+            candidate_code(spec, source)  # fail before any physics if not executable
             specs.append(spec)
         except (TypeError, ValueError) as exc:
             rejected.append({"entry": row, "error": str(exc)})
@@ -201,17 +301,33 @@ def main() -> int:
     ap.add_argument("--run-dir", type=Path)
     ap.add_argument("--operators", type=Path,
                     help="accepted.json from structural_operator_campaign")
+    ap.add_argument("--source", type=Path,
+                    help="source boundary JSON for the transform families; makes "
+                         "this an INHERITED arm, reported separately from "
+                         "independent construction")
+    ap.add_argument("--screen-niter", type=int, default=20000,
+                    help="iteration cap for the escalated re-screen of a "
+                         "near-converged soft fail (vlf's own niter is 20000)")
     args = ap.parse_args()
     if args.operators:
         args.operators = args.operators.resolve()
     if args.retries < 0 or args.retries > 2:
         ap.error("--retries must be between 0 and 2")
 
+    source = None
+    if args.source:
+        payload = json.loads(args.source.read_text())
+        source = payload.get("boundary", payload)
+        source_hash = stable_hash(source)
+
     # Must precede task import: this is a technical isolation boundary.
     os.environ["STELLAR_NO_BANK"] = "1"
+    # eval_timeout must leave room for the escalated re-screen: the recovered
+    # probe solves took 29-48 s wall against the 75 s that used to be the cap.
     os.environ.setdefault("STELLAR_TRAIN_OVERRIDES", json.dumps({
-        "max_evals": 2, "cpu_budget": 150.0, "collect_top": 1, "workers": 1,
-        "eval_timeout": 75.0}))
+        "max_evals": 2, "cpu_budget": 400.0, "collect_top": 1, "workers": 1,
+        "eval_timeout": 150.0}))
+    base_niter = os.environ.setdefault("STELLAR_SOFT_FAIL_NITER", "5000")
     from tasks.stellar_p2.task import TASK, verify_boundary
 
     physics_lock = CampaignLock(ROOT / "runs/.stellar-physics.lock")
@@ -226,6 +342,8 @@ def main() -> int:
         "promote": args.promote, "lf": args.lf,
         "operators": (str(args.operators.relative_to(ROOT.resolve())) if args.operators else None),
         "operators_sha256": file_sha256(args.operators) if args.operators else None,
+        "source_boundary_hash": (stable_hash(source) if source else None),
+        "screen_niter": args.screen_niter,
         "source_sha256": {p: file_sha256(ROOT / p) for p in (
             "experiments/structural_census.py", "core/structural_discovery.py",
             "core/stellar_operators.py", "tasks/stellar_p2/task.py")}}
@@ -247,12 +365,15 @@ def main() -> int:
     state["evaluator_fingerprint"] = fingerprint
     rejected_queue = []
     if args.operators:
-        specs, rejected_queue = load_operator_specs(args.operators)
+        specs, rejected_queue = load_operator_specs(args.operators, source)
     else:
         specs = design(args.seed, args.per_arm, args.nae_mode, args.profile)
     allowed_families = {x.strip() for x in args.families.split(",") if x.strip()}
-    if not allowed_families <= {"nae", "nae_axis", "ellipse"}:
-        raise ValueError("--families supports only nae,nae_axis,ellipse")
+    executable = {"nae", "nae_axis", "ellipse", *TRANSFORM_FAMILIES}
+    if not allowed_families <= executable:
+        raise ValueError(f"--families supports only {','.join(sorted(executable))}")
+    if allowed_families & set(TRANSFORM_FAMILIES) and source is None:
+        raise ValueError("transform families require --source")
     specs = [s for s in specs if s.family in allowed_families]
     if args.max_jobs is not None:
         specs = specs[:args.max_jobs]
@@ -266,25 +387,22 @@ def main() -> int:
             if (prior_errors and not retryable(prior_errors[-1])) or \
                     int(previous.get("attempts", 0)) >= args.retries + 1:
                 continue
-        result = None
-        errors = []
-        for attempt in range(args.retries + 1):
-            result = TASK.evaluate(candidate_code(spec), "train")
-            if not result.error:
-                break
-            errors.append(result.error)
-            if not retryable(result.error):
-                break
+        result, errors, escalated = evaluate_spec(
+            TASK, spec, source, args.retries, args.screen_niter, base_niter)
         entry = {"operator": asdict(spec), "operator_id": spec.id,
                  "attempts": len(errors) + int(result is not None and not result.error),
-                 "errors": errors, "status": "failed"}
+                 "errors": errors, "escalated": escalated, "status": "failed"}
         if result is not None and not result.error:
             # The task cache is the authoritative artifact returned by this code.
             import hashlib
-            code_key = hashlib.sha1(candidate_code(spec).encode()).hexdigest()[:12]
+            code_key = hashlib.sha1(
+                candidate_code(spec, source).encode()).hexdigest()[:12]
             boundary = TASK._bcache[code_key]
-            provenance = Provenance(spec.id, args.seed, independent=True,
-                                    public_bank_enabled=False)
+            provenance = (Provenance(spec.id, args.seed, independent=True,
+                                     public_bank_enabled=False) if source is None
+                          else Provenance(spec.id, args.seed, (source_hash,),
+                                          independent=False,
+                                          public_bank_enabled=False))
             record = BasinRecord(spec.id, boundary, enrich_metrics(result.metrics), provenance,
                                  fingerprint, "very_low_fidelity", solves=2)
             entry.update({"status": "evaluated", "boundary": boundary,
@@ -313,6 +431,14 @@ def main() -> int:
               "evaluated": len(records), "failed": len(specs) - len(records),
               "distinct_cells": len({r.descriptor.cell for r in records}),
               "promotable": sum(census_promotable(r) for r in records),
+              # An inherited arm is never reported as independent discovery.
+              "arm": ("inherited" if source is not None else "independent"),
+              "source_boundary_hash": (stable_hash(source) if source else None),
+              "escalated_screens": sum(bool(e.get("escalated"))
+                                       for e in state["jobs"].values()),
+              "escalated_recoveries": sum(
+                  bool(e.get("escalated")) and e.get("status") == "evaluated"
+                  for e in state["jobs"].values()),
               "queue_rejected": len(rejected_queue),
               "queue_rejections": rejected_queue,
               "best_L_by_feasibility_band": {band: max(

@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT))
 
 from core.ledger import BudgetGuard, Ledger
 from core.llm import LLM
-from core.structural_llm import OperatorDesigner
+from core.structural_llm import (CONSTRUCTION_FAMILIES, TRANSFORM_FAMILIES,
+                                 OperatorDesigner)
 
 
 class DryRunLLM:
@@ -65,8 +66,13 @@ def main() -> int:
     llm = DryRunLLM() if args.dry_run else LLM(ledger, guard)
     designer = OperatorDesigner(llm, args.model, args.critic_model, ledger)
     requested_families = {x.strip() for x in args.families.split(",") if x.strip()}
-    if not requested_families <= {"nae", "nae_axis", "ellipse"} or not requested_families:
-        ap.error("--families must be a non-empty subset of nae,nae_axis,ellipse")
+    executable = CONSTRUCTION_FAMILIES | TRANSFORM_FAMILIES
+    if not requested_families <= executable or not requested_families:
+        ap.error(f"--families must be a non-empty subset of {','.join(sorted(executable))}")
+    if requested_families & TRANSFORM_FAMILIES and requested_families - TRANSFORM_FAMILIES:
+        # The two arms have different prompts, critics and provenance; mixing
+        # them in one campaign would hand the writer a contradictory contract.
+        ap.error("transform families must be campaigned separately from construction")
     designer.allowed_families = requested_families
     evidence_paths = [ROOT / "plans/stellar-070-structural-discovery-plan.md",
                       *sorted((ROOT / "runs").glob("structural-*/report.json"))]

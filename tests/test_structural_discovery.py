@@ -29,7 +29,12 @@ def test_operator_contract_and_deterministic_design():
     assert candidate_code(design(7, 1)[0]).count("fm.eval(") == 1
     with pytest.raises(ValueError, match="5%"):
         OperatorSpec("tiny", "1", {}, "polish", .01, "stop")
-    unsupported = OperatorSpec("mode_continuation", "1", {}, "new support band", .1, "stop")
+    # Transform families are executable now, but only against a source basin;
+    # families with no executor at all still refuse.
+    inherited = OperatorSpec("mode_continuation", "1", {}, "new support band", .1, "stop")
+    with pytest.raises(ValueError, match="requires a source boundary"):
+        candidate_code(inherited)
+    unsupported = OperatorSpec("nfp_pivot", "1", {}, "topology pivot", .1, "stop")
     with pytest.raises(ValueError, match="does not support"):
         candidate_code(unsupported)
 

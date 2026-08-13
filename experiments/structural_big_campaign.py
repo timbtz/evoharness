@@ -34,6 +34,12 @@ def main() -> int:
                     default=ROOT / "runs/structural-big-1")
     ap.add_argument("--proposals", type=int, default=48)
     ap.add_argument("--usd", type=float, default=25.0)
+    ap.add_argument("--source", type=Path,
+                    default=ROOT / "runs/composite_polish_campaign/champion/best_boundary.json",
+                    help="source basin for the inherited transform arm")
+    ap.add_argument("--transform-proposals", type=int, default=24)
+    ap.add_argument("--no-inherited", action="store_true",
+                    help="independent construction only (the pre-2026-08-13 shape)")
     args = ap.parse_args()
     gate = audit()
     if not gate["large_run_ready"]:
@@ -46,6 +52,7 @@ def main() -> int:
     operators = run_dir / "operators"
     physics = run_dir / "physics-v2"
     continuation = run_dir / "continuation"
+    inherited = run_dir / "inherited"
     commands = {
         "operators": [sys.executable, str(ROOT / "experiments/structural_operator_campaign.py"),
             "--proposals", str(args.proposals), "--usd", str(args.usd), "--seconds", "21600",
@@ -54,10 +61,22 @@ def main() -> int:
             "--operators", str(operators / "accepted.json"), "--seed", "7201",
             "--retries", "1", "--promote", "6", "--lf", "--families",
             "nae,nae_axis,ellipse", "--run-dir", str(physics)],
+        # Inherited arm: the same typed pipeline, but transforming a converged
+        # source basin, and CLOSED LOOP -- each operator is screened before the
+        # next is proposed. Independent construction has never produced a
+        # boundary within 0.6 of feasible, so this is the arm with a live path
+        # to 0.70, and open-loop proposing is what wasted the first two.
+        "inherited": [sys.executable,
+            str(ROOT / "experiments/structural_inherited_loop.py"),
+            "--rounds", str(args.transform_proposals), "--usd", str(args.usd),
+            "--seconds", "36000", "--source", str(args.source),
+            "--seed", "7501", "--run-dir", str(inherited)],
         "continuation": [sys.executable, str(ROOT / "experiments/structural_continuation.py"),
             str(physics / "report.json"), "--run-dir", str(continuation),
             "--max-bands", "3", "--seed", "8201"]}
-    for name in ("operators", "physics", "continuation"):
+    stages = ("operators", "physics", "continuation") if args.no_inherited else (
+        "inherited", "operators", "physics", "continuation")
+    for name in stages:
         if not run_stage(name, commands[name], state, state_path, run_dir / "logs"):
             state["halt"] = f"stage {name} failed; inspect log and resume"
             atomic_json(state_path, state); return 2
