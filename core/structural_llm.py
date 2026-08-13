@@ -6,17 +6,17 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from core.structural_discovery import OperatorSpec, stable_hash
+from core.structural_discovery import (TRANSFORM_FAMILIES, OperatorSpec,
+                                       stable_hash)
 
 FAMILIES = {"nae", "nae_axis", "ellipse", "mode_continuation", "truncation_reconstruction",
             "structural_dilation", "axis_boundary_codesign", "nfp_pivot"}
 CONSTRUCTION_FAMILIES = {"nae", "nae_axis", "ellipse"}
-# Transform families act on a SOURCE basin, so they are inherited-arm only.
-# Until 2026-08-13 they were nameable but not executable: every accepted
+# Transform families (defined in core.structural_discovery, which also carries
+# their materiality floor) act on a SOURCE basin, so they are inherited-arm
+# only. Until 2026-08-13 they were nameable but not executable: every accepted
 # proposal collapsed to a construction parameter tuple, which is why elaborate
 # mechanisms ("rigid rotor", "torsion dome") were never actually run.
-TRANSFORM_FAMILIES = {"truncation_reconstruction", "structural_dilation",
-                      "mode_continuation"}
 TRANSFORM_SCHEMA = {
     "truncation_reconstruction": {"core_poloidal_mode", "core_toroidal_mode",
                                   "band_amplitude", "phase_seed"},
@@ -25,11 +25,11 @@ TRANSFORM_SCHEMA = {
                           "band_amplitude", "phase_seed"}}
 TRANSFORM_BOUNDS = {
     "truncation_reconstruction": {"core_poloidal_mode": (1, 6), "core_toroidal_mode": (1, 6),
-                                  "band_amplitude": (1e-4, .05), "phase_seed": (0, 2 ** 31)},
+                                  "band_amplitude": (1e-6, .05), "phase_seed": (0, 2 ** 31)},
     "structural_dilation": {"radial_scale": (.5, 2.), "vertical_scale": (.5, 2.),
                             "mode_decay": (0., 1.)},
     "mode_continuation": {"max_poloidal_mode": (1, 8), "max_toroidal_mode": (1, 8),
-                          "band_amplitude": (1e-4, .05), "phase_seed": (0, 2 ** 31)}}
+                          "band_amplitude": (1e-6, .05), "phase_seed": (0, 2 ** 31)}}
 
 WRITER_PROMPT = """You design ONE structural stellarator-basin operator, not a whole optimizer.
 Target a 5-10% or larger increase in L. Gradients and coefficient micro-polish are forbidden.
@@ -76,9 +76,33 @@ r_cos[0][0] is the major radius R0. `parameters` must be numeric JSON values, EX
 TRANSFORM_WRITER_PROMPT = """You design ONE structural transformation of an EXISTING converged
 stellarator basin, not a whole optimizer. This is the declared inherited arm: the source basin is
 supplied by the host, is reported separately from independent discovery, and you never see or write
-boundary coefficients. Target a 5% or larger increase in L while keeping the equilibrium solvable.
-Coefficient micro-polish and gradient steps are forbidden — those are a later stage.
-Allowed families: {families}.
+boundary coefficients. Coefficient micro-polish and gradient steps are forbidden — those are a
+later stage. Allowed families: {families}.
+
+WHAT IS BEING SCORED. Not L alone: the honest score, which is zero the moment any constraint is
+violated. The source basin sits AT the wall, so a move that gains L and pushes the active violation
+out scores nothing at all. The measured frontier on this basin (host sweep, one solve per point):
+
+  mode_continuation band_amplitude 1e-4 : L +0.272, feasibility UNCHANGED, honest +0.0136  <- win
+  mode_continuation band_amplitude 3e-4 : L +0.136, feasibility +0.0047, qi active, honest none
+  mode_continuation band_amplitude 1e-3 : L -1.896, feasibility +0.153,  qi active, honest none
+  structural_dilation scale 1.003       : L -0.053, feasibility -0.0030, honest +0.0002
+  structural_dilation scale 1.01        : L -0.174, feasibility +0.0114, qi active, honest none
+  structural_dilation scale 1.03        : L -0.505, feasibility +0.0747, qi active, honest none
+
+Read that honestly: the useful region is roughly two orders of magnitude smaller than a "5% L gain"
+would suggest, and isotropic dilation LOWERS L on this basin in both directions tested. A 2%
+L gain at unchanged feasibility beats a 20% L gain that breaks qi, because the second scores zero.
+
+AND THE HARDER LESSON. Those numbers are very-low-fidelity. The leaderboard scores at high
+fidelity, and the 1e-4 band winner above was re-scored there: it gains +0.0136 at vlf and LOSES
+0.0007 to 0.0017 officially. Activating brand-new high-order modes helps the coarse solve and
+does not survive the fine one. So a vlf gain is a hypothesis, not a result, and the mechanism that
+produced this one is measured as a resolution artifact. Do not simply retune its amplitude, phase
+or mode limits and expect a different verdict. Propose a mechanism whose L gain has a physical
+reason to survive refinement -- one that reshapes support the source ALREADY uses rather than
+switching on modes it does not. Claim the L gain you actually expect (>=0.2%); an inflated claim
+is not rewarded, and the host will re-score your leaders officially.
 
 Return ONLY one JSON object with exactly these fields:
 family, version, parameters, mechanism, expected_l_gain_fraction, expected_constraint_effects,
@@ -127,9 +151,11 @@ The host executes these operators exactly as follows -- judge the proposal again
 implementation, not against an assumed one:
 {semantics}
 
-Reject it only if it is local polish, predicts <5% L gain, has no physical mechanism, repeats a
+Reject it only if it predicts less than a 0.2% L gain, has no physical mechanism, repeats a
 parameter region the evidence already measured as failing, lacks a cheap kill criterion, embeds raw
-Fourier coefficients, or its parameters fall outside the documented ranges. If the mechanism is
+Fourier coefficients, or its parameters fall outside the documented ranges. Do NOT demand a 5% L
+gain: the measured frontier on this basin is that gains above ~2% break the qi constraint and score
+zero, so a small move at unchanged feasibility is the winning move, not timidity. If the mechanism is
 plausible under the implementation above and the prediction is falsifiable, accept it: an operator
 that is wrong about the physics is cheap to measure and is how this campaign learns.
 Return ONLY JSON:

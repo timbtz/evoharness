@@ -9,8 +9,10 @@ versus result -- into the evidence for the next round.
 
 Inherited arm by construction: it transforms a supplied source basin, marks
 provenance non-independent, and is reported separately from independent
-discovery. Every candidate that beats the source at very low fidelity is
-confirmed at low fidelity before it is called an improvement.
+discovery. A candidate that beats the source at very low fidelity is confirmed
+at low AND official fidelity before it is called an improvement -- the band
+continuation that gains +0.0136 vlf loses 0.0007-0.0017 official, so the vlf
+screen alone would have recorded a resolution artifact as the campaign's win.
 """
 from __future__ import annotations
 
@@ -37,8 +39,10 @@ from experiments.structural_census import atomic_json, candidate_code
 BASELINE_TEMPLATE = """## Measured source basin (the incumbent you must beat)
 objective_L={L:.4f} feasibility={feasibility:.6f} honest_score={honest}
 active_violation={active} log10_qi={qi} aspect_ratio={aspect:.4f}
+official_score={official}
 A candidate is an improvement only if honest_score rises AND feasibility does
-not. feasibility > 0 means infeasible; the source is nearly at the wall."""
+not. feasibility > 0 means infeasible; the source is nearly at the wall. The
+official score is the verdict; the vlf honest score is only the screen."""
 
 ROUND_TEMPLATE = """- round {round}: {family}/{version} {parameters}
   predicted {predicted:+.0%} L; measured {outcome}"""
@@ -48,10 +52,20 @@ def outcome_text(entry: dict) -> str:
     if entry.get("status") != "evaluated":
         return f"FAILED ({str(entry.get('error'))[:160]})"
     m = entry["metrics"]
-    return ("L={L:.4f} feasibility={f:.6f} honest={h} active={a}".format(
+    text = ("L={L:.4f} feasibility={f:.6f} honest={h} active={a}".format(
         L=m.get("objective_L"), f=m.get("feasibility"),
         h=("%.6f" % m["honest_score"]) if m.get("honest_score") is not None else "none",
         a=m.get("active_violation")))
+    # A vlf gain means nothing until the fidelity it is not optimizing agrees:
+    # band continuation at amplitude 1e-4 gains +0.0136 vlf and LOSES 0.0007 to
+    # 0.0017 official (runs/transform-frontier/official.json, 2026-08-13).
+    official = entry.get("official") or {}
+    if official.get("score") is not None:
+        text += " | OFFICIAL {s:.6f} ({d:+.6f} vs source)".format(
+            s=official["score"], d=official.get("delta", float("nan")))
+    elif official.get("error"):
+        text += f" | OFFICIAL failed ({str(official['error'])[:80]})"
+    return text
 
 
 def evidence_text(baseline: dict, rounds: list[dict], plan_chars: int = 6000) -> str:
@@ -64,7 +78,8 @@ def evidence_text(baseline: dict, rounds: list[dict], plan_chars: int = 6000) ->
         honest=("%.6f" % metrics["honest_score"]
                 if metrics.get("honest_score") is not None else "none"),
         active=metrics.get("active_violation"), qi=metrics.get("log10_qi"),
-        aspect=metrics.get("aspect_ratio", float("nan"))))
+        aspect=metrics.get("aspect_ratio", float("nan")),
+        official=baseline.get("official_score", "not yet measured")))
     if rounds:
         lines = [ROUND_TEMPLATE.format(
             round=r["round"], family=r["operator"]["family"],
@@ -104,6 +119,10 @@ def main() -> int:
     ap.add_argument("--model", default="glm-5.2")
     ap.add_argument("--critic-model", default="glm-5.2")
     ap.add_argument("--screen-niter", type=int, default=20000)
+    ap.add_argument("--official-confirmations", type=int, default=8,
+                    help="how many vlf leaders may be re-scored at official "
+                         "fidelity (~120 s each); a vlf gain is not a result "
+                         "until one of these agrees")
     args = ap.parse_args()
 
     payload = json.loads(args.source.read_text())
@@ -150,6 +169,20 @@ def main() -> int:
         raise RuntimeError(f"source basin does not screen: {state['baseline']['error']}")
     base_metrics = state["baseline"]["metrics"]
     base_honest = base_metrics.get("honest_score")
+
+    # The source's OFFICIAL score is the number every candidate is measured
+    # against; without it a vlf delta has nothing to transfer to.
+    if "source_official" not in state:
+        verdict = verify_boundary(source, official=True)
+        state["source_official"] = {"score": verdict.score, "error": verdict.error}
+        state["baseline"]["official_score"] = verdict.score
+        atomic_json(state_path, state)
+        print("SOURCE_OFFICIAL " + json.dumps(state["source_official"]), flush=True)
+    source_official = state["source_official"].get("score")
+    if not isinstance(source_official, float):
+        raise RuntimeError(f"source basin does not score officially: "
+                           f"{state['source_official'].get('error')}")
+    official_budget = {"left": args.official_confirmations}
 
     while len(state["rounds"]) < args.rounds:
         index = len(state["rounds"]) + 1
@@ -199,6 +232,22 @@ def main() -> int:
                 entry["lf"] = {"score": lf.score, "error": lf.error,
                                "metrics": (enrich_metrics(lf.metrics) if not lf.error
                                            else lf.metrics)}
+                # Official confirmation is the only verdict that counts. It is
+                # ~120 s, so it is budgeted, but a vlf gain that is never
+                # officially checked is exactly how the band artifact would have
+                # been recorded as a win.
+                if official_budget["left"] > 0:
+                    official_budget["left"] -= 1
+                    verdict = verify_boundary(entry["boundary"], official=True)
+                    entry["official"] = {
+                        "score": verdict.score, "error": verdict.error,
+                        "feasibility": (verdict.metrics or {}).get("feasibility"),
+                        "delta": ((verdict.score - source_official)
+                                  if isinstance(verdict.score, float)
+                                  and source_official is not None else None)}
+                    entry["beats_source_official"] = bool(
+                        entry["official"].get("delta") is not None
+                        and entry["official"]["delta"] > 0)
         state["rounds"].append(entry)
         atomic_json(state_path, state)
         print(json.dumps({"round": index, "family": proposal.operator.family,
@@ -209,6 +258,8 @@ def main() -> int:
     evaluated = [r for r in state["rounds"] if r.get("status") == "evaluated"]
     winners = sorted((r for r in evaluated if r.get("beats_source")),
                      key=lambda r: -r["metrics"]["honest_score"])
+    official_winners = [r for r in evaluated if r.get("beats_source_official")]
+    confirmed = [r for r in evaluated if (r.get("official") or {}).get("score") is not None]
     report = {"schema_version": 1, "report_kind": "structural_inherited_loop",
               "arm": "inherited", "source_boundary_hash": source_hash,
               "source_metrics": {k: base_metrics.get(k) for k in
@@ -217,8 +268,16 @@ def main() -> int:
               "rounds": len(state["rounds"]), "evaluated": len(evaluated),
               "rejected": sum(r.get("status") == "rejected" for r in state["rounds"]),
               "failed_screens": sum(r.get("status") == "failed" for r in state["rounds"]),
-              "beat_source": len(winners), "llm_calls": guard.calls, "usd": guard.usd,
-              "best": winners[0] if winners else None,
+              "beat_source_vlf": len(winners),
+              "officially_confirmed": len(confirmed),
+              "beat_source_official": len(official_winners),
+              "source_official_score": source_official,
+              "best_official_delta": max(
+                  ((r["official"]["delta"]) for r in confirmed
+                   if r["official"].get("delta") is not None), default=None),
+              "llm_calls": guard.calls, "usd": guard.usd,
+              "best": (official_winners[0] if official_winners
+                       else winners[0] if winners else None),
               "best_L": max((r["metrics"]["objective_L"] for r in evaluated), default=None),
               "families": {f: sum(r["operator"]["family"] == f for r in evaluated)
                            for f in sorted(TRANSFORM_FAMILIES)},

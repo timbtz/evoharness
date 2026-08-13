@@ -23,6 +23,22 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+# Transform families act on an already-converged source basin, so their
+# materiality bar is measured honest-score gain, not a 5% L claim. The flat 5%
+# floor is what pushed every accepted operator 10-30x past the measured qi
+# frontier: a mode-continuation band at amplitude 1e-4 gains 2.2% L and +0.0136
+# honest at UNCHANGED feasibility, while the 5% claim forces amplitudes that
+# drive feasibility to 0.12-0.36 (runs/transform-frontier/report.json).
+TRANSFORM_FAMILIES = {"truncation_reconstruction", "structural_dilation",
+                      "mode_continuation"}
+L_GAIN_FLOOR = {"transform": .002, "construction": .05}
+
+
+def min_l_gain(family: str) -> float:
+    return L_GAIN_FLOOR["transform" if family in TRANSFORM_FAMILIES
+                        else "construction"]
+
+
 @dataclass(frozen=True)
 class OperatorSpec:
     family: str
@@ -36,8 +52,10 @@ class OperatorSpec:
     def __post_init__(self) -> None:
         if not self.family or not self.version:
             raise ValueError("operator family and version are required")
-        if self.expected_l_gain_fraction < 0.05:
-            raise ValueError("structural operators must claim a >=5% plausible L gain")
+        floor = min_l_gain(self.family)
+        if self.expected_l_gain_fraction < floor:
+            raise ValueError(f"{self.family} operators must claim a "
+                             f">={floor:.1%} plausible L gain")
         if not self.mechanism.strip() or not self.kill_criterion.strip():
             raise ValueError("mechanism and kill criterion are required")
 
