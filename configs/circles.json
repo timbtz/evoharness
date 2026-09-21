@@ -1,0 +1,12 @@
+{
+  "task": "circles",
+  "execution": "task_default",
+  "seed": 0,
+  "switches": {"feedback": "score_only", "gate": "public_only", "search": "greedy", "knowledge": "off", "roles": "single_strong"},
+  "models": {"strong": "glm-5.2", "cheap": "glm-4.7"},
+  "budget": {"max_usd": 2.0, "max_calls": 120, "max_seconds": 1800},
+  "objective": "quality",
+  "temperatures": {"writer": 0.9, "reflect": 0.4, "judge": 0.2},
+  "generations": 1000,
+  "knowledge_mode": "inject"
+}

@@ -1,12 +1,32 @@
-reference/
+# All generated state, research inputs, local history, and benchmark downloads.
+.local/
+# Also exclude legacy locations if an old checkout or script recreates them.
 runs/
-.env
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
-tasks/binpacking/instances/*.json
-tasks/tsp/instances/*.tsp
-tasks/cvrp/instances/
-server.log
+memory/
+wiki/
+reference/
+external/
+hf_refresh/
 plans/
+plants/
+artifacts/
+# Credentials and machine-local tools.
+.env
+.env.*
+!.env.example
+.claude/
+.codex/
+.agents/
+.venv*/
+# Python/build/test outputs.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+server.log
+.DS_Store

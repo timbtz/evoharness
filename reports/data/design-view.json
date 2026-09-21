@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "sources": [
+    "configs/stellar_p2.json",
+    "src/evoharness/engine/config.py",
+    "src/evoharness/tasks/stellar_p2/workflows/repair.py",
+    "src/evoharness/tasks/stellar_p2/workflows/research.py",
+    "reports/data/benchmark-evidence.json",
+    "reports/data/stellar-evidence.json"
+  ],
+  "configurable_axes": [
+    {
+      "axis": "feedback",
+      "implemented": [
+        "score_only",
+        "reflections",
+        "memory"
+      ],
+      "stellar_p2_baseline": "score_only"
+    },
+    {
+      "axis": "gate",
+      "implemented": [
+        "public_only",
+        "holdout",
+        "quality_diversity"
+      ],
+      "stellar_p2_baseline": "public_only"
+    },
+    {
+      "axis": "search",
+      "implemented": [
+        "greedy",
+        "islands",
+        "staged",
+        "bandit_fork"
+      ],
+      "stellar_p2_baseline": "greedy"
+    },
+    {
+      "axis": "knowledge",
+      "implemented": [
+        "off",
+        "task_notes",
+        "web"
+      ],
+      "stellar_p2_baseline": "off"
+    },
+    {
+      "axis": "roles",
+      "implemented": [
+        "single_strong",
+        "split_roles"
+      ],
+      "stellar_p2_baseline": "single_strong"
+    }
+  ],
+  "baseline_context": {
+    "task": "stellar_p2",
+    "execution": "task_default",
+    "model": "glm-5.2",
+    "objective": "quality",
+    "memory_enabled": false
+  },
+  "latest_persisted_repair": {
+    "run": "runs/stellar-zai-repair-2",
+    "rounds": 694,
+    "evaluated": 569,
+    "accepted": 12,
+    "fidelity": "very_low_fidelity",
+    "worst_violation": 0.04070152608757205,
+    "active_violation": "mirror",
+    "officially_verified": false
+  },
+  "plot_series": {
+    "notes": "Series are grouped by comparable experiment family. Do not connect unaided construction, imported-database repair, and inherited public-seed refinement into one trajectory.",
+    "unaided_construction_terminal_worst_violation": [
+      {
+        "run": "runs/stellar_p2-s42-27282945",
+        "value": 0.519,
+        "fidelity": "search/legacy",
+        "approximate": true
+      },
+      {
+        "run": "runs/stellar_p2-s7-30186401",
+        "value": 0.517,
+        "fidelity": "search/legacy",
+        "approximate": true
+      },
+      {
+        "run": "runs/stellar_p2-s11-38566380",
+        "value": 0.4252589812774451,
+        "fidelity": "search/legacy",
+        "approximate": false
+      },
+      {
+        "run": "runs/stellar-zai-persistent-1",
+        "value": 0.562452172890736,
+        "fidelity": "very_low_fidelity",
+        "approximate": false
+      }
+    ],
+    "database_repair_acceptance_milestones": {
+      "run": "runs/stellar-zai-repair-2",
+      "lineage_warning": "Accepted milestones can switch among imported/self-generated seeds and are not one boundary lineage.",
+      "points": [
+        {
+          "round": 4,
+          "worst_violation": 0.546108004245504,
+          "objective_L": 4.52970829644872
+        },
+        {
+          "round": 8,
+          "worst_violation": 0.18578692417592854,
+          "objective_L": 6.267884717453106
+        },
+        {
+          "round": 9,
+          "worst_violation": 0.1489837630612647,
+          "objective_L": 6.366544549967086
+        },
+        {
+          "round": 10,
+          "worst_violation": 0.14640111492292607,
+          "objective_L": 6.558935377876012
+        },
+        {
+          "round": 19,
+          "worst_violation": 0.11806642320312632,
+          "objective_L": 6.382046452820238
+        },
+        {
+          "round": 23,
+          "worst_violation": 0.054968931729066084,
+          "objective_L": 3.78069060337135
+        },
+        {
+          "round": 27,
+          "worst_violation": 0.04891795293170867,
+          "objective_L": 3.7050587869008913
+        },
+        {
+          "round": 32,
+          "worst_violation": 0.04669423410869955,
+          "objective_L": 3.909897931882653
+        },
+        {
+          "round": 34,
+          "worst_violation": 0.04615017064624319,
+          "objective_L": 3.9413642631510735
+        },
+        {
+          "round": 93,
+          "worst_violation": 0.04070152609620237,
+          "objective_L": 3.581471424507232
+        },
+        {
+          "round": 212,
+          "worst_violation": 0.04070152608757205,
+          "objective_L": 3.5814714242521344
+        }
+      ]
+    },
+    "fd_polish_transfer": [
+      {
+        "stage": "start",
+        "vlf_honest": 0.619963,
+        "official_score": 0.632082
+      },
+      {
+        "stage": "end",
+        "vlf_honest": 0.622759,
+        "official_score": 0.634038
+      }
+    ],
+    "transform_fidelity_reversal": [
+      {
+        "case": "band_seed_3",
+        "vlf_delta": 0.01363426690574887,
+        "official_delta": -0.0016630716973239368
+      },
+      {
+        "case": "band_seed_5",
+        "vlf_delta": 0.013602918261412245,
+        "official_delta": -0.0007058859472229839
+      }
+    ]
+  },
+  "benchmark_studies": {
+    "initial_binpacking_5_axis_factorial": {
+      "id": "initial_binpacking_5_axis_factorial",
+      "task": "binpacking",
+      "evidence_grade": "factorial_three_seeds",
+      "design": {
+        "configurations": 32,
+        "seeds_per_configuration": 3,
+        "finished_runs": 96,
+        "calls_per_run": 20,
+        "balanced": true
+      },
+      "private_score_summary": {
+        "n": 96,
+        "mean": -0.03947299025818317,
+        "min": -0.18217850220294743,
+        "max": -0.011480710249303066
+      },
+      "main_effects": [
+        {
+          "axis": "feedback",
+          "a": "score_only",
+          "a_mean": -0.04034395421232768,
+          "b": "reflections",
+          "b_mean": -0.03860202630403875,
+          "delta_b_minus_a": 0.0017419279082889275,
+          "n_a": 48,
+          "n_b": 48
+        },
+        {
+          "axis": "gate",
+          "a": "public_only",
+          "a_mean": -0.03843439595213928,
+          "b": "holdout",
+          "b_mean": -0.04051158456422715,
+          "delta_b_minus_a": -0.002077188612087867,
+          "n_a": 48,
+          "n_b": 48
+        },
+        {
+          "axis": "search",
+          "a": "greedy",
+          "a_mean": -0.04107478492119605,
+          "b": "islands",
+          "b_mean": -0.037871195595170375,
+          "delta_b_minus_a": 0.0032035893260256784,
+          "n_a": 48,
+          "n_b": 48
+        },
+        {
+          "axis": "knowledge",
+          "a": "off",
+          "a_mean": -0.043657254672552555,
+          "b": "wiki_fs",
+          "b_mean": -0.03528872584381387,
+          "delta_b_minus_a": 0.008368528828738682,
+          "n_a": 48,
+          "n_b": 48
+        },
+        {
+          "axis": "roles",
+          "a": "single_strong",
+          "a_mean": -0.03683121313102188,
+          "b": "split_roles",
+          "b_mean": -0.042114767385344545,
+          "delta_b_minus_a": -0.005283554254322663,
+          "n_a": 48,
+          "n_b": 48
+        }
+      ],
+      "confounders": [
+        "Only bin packing and a 20-call budget were tested.",
+        "No confidence intervals or interaction estimates were recorded.",
+        "Many configurations ended at the seed score."
+      ],
+      "source_paths": [
+        "docs/history/initial-screening.md",
+        "docs/analysis/data/screening-binpacking.csv",
+        "runs/screening/binpacking"
+      ]
+    },
+    "cvrp_memory_vs_score_only_seed3": {
+      "id": "cvrp_memory_vs_score_only_seed3",
+      "task": "cvrp",
+      "evidence_grade": "paired_configuration_single_seed",
+      "shared_configuration": {
+        "seed": 3,
+        "resume_from": "cvrp-s0-43507138",
+        "gate": "holdout",
+        "search": "staged",
+        "knowledge": "off",
+        "roles": "single_strong",
+        "max_usd": 4
+      },
+      "arms": [
+        {
+          "feedback": "score_only",
+          "run": "cvrp-s3-51556548",
+          "best_id": "c0033r1",
+          "private_score": -0.7475657085848356,
+          "private_gap_pct": 0.748,
+          "calls": 96,
+          "usd": 4.0165,
+          "seconds": 8405.1
+        },
+        {
+          "feedback": "memory",
+          "run": "cvrp-s3-45465035",
+          "best_id": "c0035",
+          "private_score": -0.5806637906329615,
+          "private_gap_pct": 0.581,
+          "calls": 165,
+          "usd": 4.0831,
+          "seconds": 5951.3
+        }
+      ],
+      "observed_gap_reduction_percentage_points_from_raw_scores": 0.16690191795187415,
+      "observed_relative_gap_reduction_from_raw_scores": 0.22326053219833278,
+      "confounders": [
+        "One seed and one run per arm.",
+        "Reviewer calls make total call counts unequal.",
+        "The shared wiki accumulated evidence over wall-clock time, so run order matters.",
+        "Anytime CVRP evaluation has measured wall-clock-coupled noise."
+      ],
+      "source_paths": [
+        "runs/cvrp-s3-51556548/ledger.jsonl",
+        "runs/cvrp-s3-45465035/ledger.jsonl",
+        "docs/history/decisions.md",
+        "memory/cvrp/performance-analysis/score-noise-and-gate.md"
+      ]
+    }
+  }
+}

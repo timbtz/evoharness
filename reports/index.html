@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="EvoHarness research evidence: optimizer design choices, local run inventory, and the path to stellarator discovery.">
+  <title>EvoHarness · Research explorer</title>
+  <link rel="stylesheet" href="explorer.css">
+  <script src="data/run-inventory.js" defer></script>
+  <script src="explorer.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to evidence</a>
+<header>
+  <div class="brand"><span class="mark" aria-hidden="true">◎</span><a href="../README.md">EvoHarness</a><span class="tag">RESEARCH EXPLORER</span></div>
+  <nav aria-label="Page sections"><a href="#architecture">Architecture</a><a href="#axes">Design axes</a><a href="#evidence">Run evidence</a><a href="#trajectory">Trajectory</a></nav>
+</header>
+<main id="main">
+  <section class="intro">
+    <p class="eyebrow">EXECUTABLE DISCOVERY / AN EVOLVING RESEARCH WORKBENCH</p>
+    <h1>What makes an<br><span>optimizer discover?</span></h1>
+    <p class="lede">Follow the design choices, inspect the evidence, and separate better search behavior from a verified new artifact. Stellarator design is the main case study.</p>
+    <div class="links"><a class="button" href="../README.md#stellarator-evidence-in-depth">Read the stellarator study ↗</a><a href="../README.md#evidence-from-the-algorithmic-tasks">Earlier benchmark results →</a><a href="../README.md#optimizer-lineage">Optimizer lineage →</a></div>
+  </section>
+  <section class="stats" aria-label="Inventory coverage">
+    <div><strong id="stat-groups">—</strong><span>local evidence groups</span></div>
+    <div><strong id="stat-logs">—</strong><span>JSONL files scanned</span></div>
+    <div><strong id="stat-rows">—</strong><span>records inspected</span></div>
+    <div><strong>6</strong><span>task contracts implemented</span></div>
+  </section>
+  <p class="caption" id="snapshot">Committed local snapshot. Raw experiment data is not redistributed.</p>
+
+  <section id="architecture">
+    <div class="section-title"><div><p class="eyebrow">01 / SYSTEM</p><h2>Three paths. A common demand for evidence.</h2></div><a href="../README.md#architecture">Implementation walkthrough ↗</a></div>
+    <p>Configurable evolution, persistent physics experiments, and a research task DAG have distinct entrypoints. Optional feedback and orchestration features depend on the selected path.</p>
+    <a class="figure" href="figures/architecture.png"><img src="figures/architecture.png" alt="Outer program-search loop around an inner VMEC optimizer, with direct training feedback, separate clean validation, retained evidence, and optional research orchestration." loading="lazy"></a>
+    <p class="caption">Paper-style system illustration · <a href="data/visual-provenance.json">generation prompts and source references</a></p>
+    <a class="figure" href="figures/reward-feedback.pdf"><img src="figures/reward-feedback.svg" alt="Stellarator score contract separating official P2, training and validation selection penalties, and returned feedback fields." loading="lazy"></a>
+    <p class="caption">Scoring definitions from the evaluator implementation. Penalty constants shown are code defaults, not measured effects.</p>
+  </section>
+
+  <section id="axes">
+    <div class="section-title"><div><p class="eyebrow">02 / DESIGN SPACE</p><h2>The choices inside the optimizer</h2></div><a href="../README.md#research-agenda">Open hypotheses ↗</a></div>
+    <a class="figure" href="figures/optimizer-axes.pdf"><img src="figures/optimizer-axes.svg" alt="Selected stellarator configuration, execution and physics controls, persistent repair workflow, and independent research DAG." loading="lazy"></a>
+    <p class="caption">Blue selections come from the committed stellarator config. The latest repair workflow and research DAG use separate entry points. <a href="data/design-view.json">Configuration and evidence data</a>.</p>
+    <p>These are implemented choices or research directions. Click a card for the mechanism and the evidence needed to judge it.</p>
+    <div class="axis-grid">
+      <details><summary><span class="number">01</span> Feedback <span>↗</span></summary><p>Scalar scores, reflections, persistent memory, constraint diagnostics, and optional gradients offer different information to the proposer.</p><p><b>Question:</b> does verified quality improve when inner solver cost is matched? Tool adoption alone is not an outcome.</p><a href="../src/evoharness/strategies/feedback.py">Feedback implementation</a></details>
+      <details><summary><span class="number">02</span> Selection <span>↗</span></summary><p>Train-greedy, holdout, and quality-diversity gates differ in what survives. Stellarator shaping, official scoring, and provenance checks answer different questions.</p><p><b>Question:</b> is the apparent gain robust to independent fidelity and tolerance accounting?</p><a href="../src/evoharness/strategies/qd_gate.py">Quality-diversity gate</a></details>
+      <details><summary><span class="number">03</span> Search <span>↗</span></summary><p>Greedy, islands, staged schedules, and bandit forks control candidate exploration. The historical campaign driver branches and merges entire runs.</p><p><b>Question:</b> do branches explore distinct solution mechanisms, or return to the same physical basin?</p><a href="../src/evoharness/strategies/search.py">Search implementation</a></details>
+      <details><summary><span class="number">04</span> Knowledge + memory <span>↗</span></summary><p>Curated task notes, learned memory, web research, and durable loop state are different forms of context. Web knowledge in the configurable loop requires memory feedback.</p><p><b>Question:</b> does memory prevent repeated failures without preserving stale diagnoses or contaminating comparisons?</p><a href="../src/evoharness/strategies/memory.py">Memory implementation</a></details>
+      <details><summary><span class="number">05</span> Models + roles <span>↗</span></summary><p>Writer, refiner and analyst roles operate inside evolution. A separate research coordinator can dispatch dependent explorer, experimentalist and review tasks.</p><p><b>Question:</b> which role improves outcomes under the same total model and solver budget? Historical migrations are not model ablations.</p><a href="../src/evoharness/research/store.py">Research executor</a></details>
+      <details><summary><span class="number">06</span> Representation + novelty <span>↗</span></summary><p>Code novelty, constructor-family novelty, coefficient distance and independent origin are separate properties. Repairing an imported research equilibrium retains that provenance.</p><p><b>Question:</b> can a novel and feasible artifact survive fixed-fidelity verification?</p><a href="../README.md#stellarator-evidence-in-depth">Stellarator findings</a></details>
+      <details><summary><span class="number">07</span> Sandbox <span>↗</span></summary><p>The execution policy is explicit: task defaults preserve the original benchmark backends; require_container evaluates Python and C in Docker. Stellarator evaluation always requires its pinned solver image.</p><p>Containers have no network, bounded memory, CPU and process counts, and read-only candidate mounts. Local execution is for trusted experiments and has weaker isolation.</p><a href="../src/evoharness/execution/policy.py">Execution policy</a></details>
+    </div>
+  </section>
+
+  <section id="evidence">
+    <div class="section-title"><div><p class="eyebrow">03 / AUDITABLE RECORD</p><h2>Browse the local run inventory</h2></div><a href="data/run-inventory.json" download>Download aggregate JSON ↓</a></div>
+    <aside><b>How to read this:</b> scores are comparable only within matched tasks, evaluator settings, shaping versions and budgets. “End recorded” means a <code>run_end</code> event exists; it does not mean scientific success. Other log formats need their own completion checks. Raw-source links require the original local runs.</aside>
+    <form class="filters" onsubmit="return false">
+      <label>Find a run<input id="query" type="search" placeholder="Name, path, model, or event…"></label>
+      <label>Task<select id="task"><option value="">All tasks / research logs</option></select></label>
+      <label>Records<select id="status"><option value="">All records</option><option value="ended">End recorded</option><option value="open">No run_end event</option></select></label>
+      <label>Order<select id="sort"><option value="path">Source path</option><option value="recent">Latest timestamp first</option><option value="rows">Most records first</option></select></label>
+    </form>
+    <p id="count" class="caption" aria-live="polite"></p>
+    <div class="table-scroll"><table><thead><tr><th scope="col">Source / inspect details</th><th scope="col">Task</th><th scope="col">Records</th><th scope="col">End event</th><th scope="col">Last timestamp</th></tr></thead><tbody id="runs"></tbody></table></div>
+    <p id="empty" hidden>No matching records. Clear the filters to inspect the full inventory.</p>
+    <noscript>The filters require JavaScript. Read the <a href="data/run-inventory.json">JSON snapshot</a> or the <a href="../README.md#stellarator-evidence-in-depth">static analysis</a>.</noscript>
+  </section>
+
+  <section id="trajectory">
+    <div class="section-title"><div><p class="eyebrow">04 / WHAT CHANGED</p><h2>Progress includes correcting the experiment.</h2></div><a href="../README.md#how-the-project-evolved">Git-grounded history ↗</a></div>
+    <img class="wide" src="figures/research-trajectory.svg" alt="Development from five-axis benchmark experiments through memory and campaigns, provenance and gradient audits, fidelity correction, and later research/repair loops." loading="lazy">
+    <a class="figure" href="figures/evaluation-trajectory.pdf"><img src="figures/evaluation-trajectory.svg" alt="Repair milestones, independent-constructor feasibility failures, official fidelity reversals, and evidence strength across experiment designs." loading="lazy"></a>
+    <p class="caption">Panels retain separate provenance and score definitions. Accepted repair milestones are selected observations; they are not a complete learning curve.</p>
+    <div class="two-col"><div><h3>Earlier benchmarks</h3><p>The original 96-run bin-packing screen gives a small, inspectable example of architecture choices. Marginal effects summarize this sample, not universal optimizer rankings.</p><img class="wide" src="figures/screening-effects.svg" alt="Descriptive mean private-score differences for five binary design choices in the original bin-packing screen." loading="lazy"></div><div><h3>The harder stellarator lesson</h3><p>The most useful distinction became <b>search progress versus verified artifact quality</b>. Public-seed ancestry, feasibility tolerance, evaluator fidelity and physical constraints all change what a result means.</p><p>Memory and gradients can improve the process without escaping its current family of solutions. The latest research direction broadens constructors and seed repair while retaining explicit provenance.</p><a href="../README.md#stellarator-evidence-in-depth">Read the latest state and its limitations →</a><h3>Still under investigation</h3><p>Independent discovery, technically substantive novelty, better experimental selection, and model-role allocation remain live research questions.</p><a href="../README.md#research-agenda">Experiments and falsifiers →</a></div></div>
+  </section>
+</main>
+<footer><b>EvoHarness</b><span>Evidence review · 2026-09-17 · inventory · 2026-09-21 · local assets</span><a href="../README.md">README ↑</a></footer>
+</body>
+</html>

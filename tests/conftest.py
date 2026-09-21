@@ -1,17 +1,11 @@
-"""Shared fixtures: repo root on sys.path + a deterministic MockLLM (golden tests 5–6)."""
+"""Deterministic, metered model fixture for evaluator and engine integration tests."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from core.ledger import BudgetGuard, Ledger  # noqa: E402
+from evoharness.engine.ledger import BudgetGuard, Ledger  # noqa: E402
 
 
 class MockLLM:
-    """Drop-in for core.llm.LLM: fixed $0.02/call, deterministic code sequence.
+    """Drop-in for evoharness.engine.llm.LLM: fixed $0.02/call, deterministic code sequence.
 
     Variant i shifts best-fit's preferred gap, so behaviours (and scores) differ
     across generations — enough for gates and parent selection to have real work.

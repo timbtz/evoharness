@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="360" viewBox="0 0 1440 360" role="img" aria-labelledby="title desc">
+<title id="title">EvoHarness — agentic optimization, examined</title><desc id="desc">Research workbench for executable discovery, centered on stellarator design. Decorative orbital lines represent iterative search.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#10213c"/><stop offset="1" stop-color="#103d47"/></linearGradient><linearGradient id="line"><stop stop-color="#54ddca"/><stop offset="1" stop-color="#9ba7ff"/></linearGradient></defs>
+<rect width="1440" height="360" rx="20" fill="url(#bg)"/>
+<g fill="none" stroke="url(#line)" stroke-width="1.6" opacity=".42" transform="translate(1170 180)">
+<ellipse rx="170" ry="67" transform="rotate(0)"/><ellipse rx="170" ry="67" transform="rotate(30)"/><ellipse rx="170" ry="67" transform="rotate(60)"/><ellipse rx="170" ry="67" transform="rotate(90)"/><ellipse rx="170" ry="67" transform="rotate(120)"/><ellipse rx="170" ry="67" transform="rotate(150)"/>
+<circle r="112" stroke-dasharray="3 9"/><circle r="13" fill="#65e2d0" stroke="none"/></g>
+<g font-family="DejaVu Sans,Arial,sans-serif"><text x="64" y="68" fill="#77dfcf" font-size="15" letter-spacing="4">EXECUTABLE DISCOVERY / OPEN RESEARCH</text><text x="60" y="158" fill="#fff" font-size="76" font-weight="700" letter-spacing="-3">EvoHarness</text><text x="64" y="213" fill="#e5edf6" font-size="28">Agentic optimization, examined.</text><text x="64" y="258" fill="#b6cbd7" font-size="19">Search architectures · evaluator feedback · scientific novelty</text>
+<rect x="64" y="290" width="225" height="32" rx="16" fill="#255b62"/><text x="80" y="312" fill="#a1f1df" font-size="13">◉ STELLARATOR CASE STUDY</text><text x="313" y="312" fill="#b6cbd7" font-size="13">6 TASKS / EVIDENCE FIRST / ACTIVELY EVOLVING</text></g></svg>
