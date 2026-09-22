@@ -1,0 +1,5 @@
+FROM python:3.13-slim
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir numpy==2.2.6
+ENV OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1

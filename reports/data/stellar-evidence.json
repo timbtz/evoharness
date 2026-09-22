@@ -1,0 +1,381 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-09-17",
+  "benchmark": {
+    "id": "stellar_p2",
+    "name": "ConStellaration P2: simple-to-build QI stellarator",
+    "candidate_contract": "A Python solve(fm, rng) optimizer returns a stellarator boundary; clean-room evaluation re-scores the boundary.",
+    "official_dependency": "constellaration==0.2.6 / vmecpp==0.4.11",
+    "official_score": "objective_L / 20 when every normalized violation is <= 0.01; otherwise 0",
+    "search_score": "official P2 when feasible, otherwise negative worst normalized violation; later campaigns also apply margin and novelty shaping",
+    "honest_score": "p2_score - 0.92 * max(0, feasibility - 0.002)",
+    "fidelity_warning": "Very-low-, low-, and official-fidelity objective values are not interchangeable. Official confirmation is required for score claims."
+  },
+  "latest_persisted_state": {
+    "summary": "The latest approach is feasibility-first repair of self-generated or imported scientific-database seeds with the public leaderboard bank disabled. It is not an unaided construction arm and has not produced an officially feasible boundary.",
+    "live_runtime_observation": {
+      "observed_date": "2026-09-17",
+      "steward_last_log_time_utc": "2026-09-17T07:30:02Z",
+      "docker_server_version": "27.0.3",
+      "evaluation_image_present": true,
+      "evaluation_image_id": "sha256:7cf9d69090af2ab3aad5f175ea01f232a29a0179bc48877ba167e46a2f5e6d51",
+      "factory_process_observed": true,
+      "factory_process_pid_at_observation": 1569267,
+      "caveat": "The live process and image show that historical missing-image errors are not a verified present blocker. The persisted factory state nevertheless has not advanced since 2026-08-28; process liveness alone does not prove scientific progress."
+    },
+    "repair_loop": {
+      "run": "runs/stellar-zai-repair-2",
+      "arm": "database-repair",
+      "state_mtime_utc": "2026-08-21T00:00:02Z",
+      "rounds": 694,
+      "evaluated": 569,
+      "evaluation_failed": 123,
+      "proposal_failed": 2,
+      "accepted": 12,
+      "best_round": 212,
+      "best_fidelity": "very_low_fidelity",
+      "best_selection_score": -0.04070152608757205,
+      "best_feasibility": 0.04070152608757205,
+      "best_p2_score": 0.0,
+      "best_objective_L": 3.5814714242521344,
+      "active_violation": "mirror",
+      "violations": {
+        "aspect": 0.0020000010000876143,
+        "elongation": 0.00028013442241849875,
+        "iota": -1.385482015360033,
+        "mirror": 0.04070152608757205,
+        "qi": -0.0003549847695250019
+      },
+      "officially_verified": false,
+      "feasible_under_official_threshold": false,
+      "halt_reason": "model budget: max_calls (3001 >= 3000)",
+      "sources": [
+        "runs/stellar-zai-repair-2/state.json",
+        "runs/stellar-zai-repair-2/evaluations/1603e44b8cd87f47257cbc1728aac4f64553afc7a088a9d1df5f6c734e12aa3e/very_low_fidelity.json",
+        "experiments/stellar_zai_repair_loop.py"
+      ]
+    },
+    "seed_factory": {
+      "run": "runs/zai-seed-factory-1",
+      "state_mtime_utc": "2026-08-28T17:11:21Z",
+      "rounds": 2421,
+      "attempts": 8569,
+      "measured_attempts": 2650,
+      "error_attempts": 5919,
+      "historical_missing_image_failures": 5520,
+      "saved_boundaries": 439,
+      "platform_feasibility": 0.14640111492292607,
+      "best_measured_attempt_feasibility": 0.12051542548079419,
+      "best_measured_attempt_objective_L": 6.552532634263686,
+      "last_persisted_attempt_failure": "Docker image evoharness-stellar-eval unavailable; pull access denied",
+      "caveat": "The best 0.1205 attempt persists in state.json but was not saved by the factory's L >= 12 save rule after the platform changed to the low-L repair boundary.",
+      "sources": [
+        "runs/zai-seed-factory-1/state.json",
+        "experiments/zai_seed_factory.py"
+      ]
+    },
+    "host_steward": {
+      "last_observed_heartbeat_date": "2026-09-17",
+      "behavior": "It retries the repair loop every 15 minutes and periodically retries the factory; the persisted frontier remains repair round 694 / factory round 2421 even though a factory process is currently present.",
+      "operational_assessment": "supervision active; persisted frontier stale; current process progress unresolved",
+      "sources": [
+        "runs/steward-host.log",
+        "scripts/host_steward.sh"
+      ]
+    },
+    "gradient_repair_lanes": [
+      {
+        "run": "runs/goodman-repair",
+        "start_feasibility": 0.2086703552118024,
+        "best_feasibility": 0.15091060784642157,
+        "solves": 1259,
+        "status": "trust-region collapse / no longer progressing"
+      },
+      {
+        "run": "runs/goodman2-repair",
+        "start_feasibility": 0.14640111492292607,
+        "best_feasibility": 0.14640111492292607,
+        "solves": 397,
+        "status": "six rejected steps; trust-region collapse"
+      }
+    ]
+  },
+  "historical_results": {
+    "highest_raw_official_in_legacy_ledgers": {
+      "run": "runs/stellar_p2-s204-63425638",
+      "candidate": "c0030",
+      "official_score": 0.642057729092706,
+      "feasibility": 0.009739778124402321,
+      "tolerance_fraction_used": 0.974,
+      "honest_score": 0.634937,
+      "bank_dist": 0.001539,
+      "bank_cos": 0.999998,
+      "provenance": "inherited public-seed lineage",
+      "evidence_grade": "legacy official single-shot; boundary persisted in run_end, but the path predates the full evaluator fingerprint required by the newer research harness",
+      "sources": [
+        "runs/stellar_p2-s204-63425638/ledger.jsonl",
+        "runs/stellar-research-shadow-3/SHADOW_REPORT.md"
+      ]
+    },
+    "campaign_one_public_seed_result": {
+      "run": "runs/stellar_p2-s105-26196944",
+      "candidate": "c0045",
+      "official_score": 0.6400196096242957,
+      "feasibility": 0.009305405314467663,
+      "bank_dist": 0.002638,
+      "bank_cos": 0.999989,
+      "lineage_distance_l2_fraction": 0.0047,
+      "equal_margin_estimate": 0.632,
+      "provenance": "inherited public-seed lineage",
+      "sources": [
+        "runs/stellar_p2-s105-26196944/ledger.jsonl",
+        "memory/stellar_p2/performance-analysis/provenance-and-independence.md",
+        "memory/stellar_p2/performance-analysis/feasibility-tolerance-economics.md"
+      ]
+    },
+    "low_margin_official_result": {
+      "run": "runs/polish-ceiling-champion",
+      "official_score": 0.6344214977591365,
+      "feasibility": 0.0019244442039305198,
+      "objective_L": 12.68842995518273,
+      "bank_dist": 0.002527797424030211,
+      "bank_cos": 0.99999,
+      "provenance": "inherited public-seed lineage",
+      "sources": [
+        "runs/polish-ceiling-champion/official_verify.json",
+        "wiki/logbook.md"
+      ]
+    },
+    "structural_inherited_loop": {
+      "evidence_id": "STELLAR-STRUCT-INHERITED-001",
+      "run": "runs/structural-big-2/inherited",
+      "source_official_score": 0.6416809231644797,
+      "rounds": 60,
+      "evaluated": 56,
+      "officially_confirmed": 6,
+      "beat_source_vlf": 6,
+      "beat_source_official": 2,
+      "best_official_delta": 0.00018309926263126997,
+      "provenance": "inherited",
+      "sources": [
+        "runs/structural-big-2/inherited/report.json"
+      ]
+    }
+  },
+  "run_families": [
+    {
+      "family": "legacy_optimizer_ledgers",
+      "glob": "runs/stellar_p2-*/ledger.jsonl plus runs/plan1-*/ledger.jsonl",
+      "runs": 34,
+      "completed_runs": 32,
+      "partial_runs": 2,
+      "candidate_events": 1089,
+      "accepted_candidate_events": 271,
+      "completed_positive_official": 24,
+      "completed_zero_official": 8,
+      "caveat": "Repeated continuations share ancestors; counts are event/run counts, not independent trials. Run-end private evaluation can execute a stochastic optimizer again and can differ sharply from train/val."
+    },
+    {
+      "family": "pre_seed_bank_unaided",
+      "runs": [
+        "runs/stellar_p2-s42-27282945",
+        "runs/stellar_p2-s7-30186401",
+        "runs/stellar_p2-s11-38566380"
+      ],
+      "best_worst_violation": 0.4252589812774451,
+      "best_official_score": 0.0,
+      "conclusion": "NAE/ellipse starts did not approach the 0.01 feasibility gate."
+    },
+    {
+      "family": "plan1_train_efficiency",
+      "runs": [
+        "runs/plan1-smoke-on",
+        "runs/plan1-smoke-off",
+        "runs/plan1-deep-s5-85591679",
+        "runs/plan1-deep-s7-85609652"
+      ],
+      "conclusion": "Single-stage warm evaluation reduced cost, while true hot restart changed equilibria and was rejected. Soft-fail grading recovered signal from some nonconvergence but did not create structural novelty.",
+      "sources": [
+        "docs/history/decisions.md",
+        "memory/stellar_p2/new-ideas/graded-soft-fail-and-warm-evals.md"
+      ]
+    },
+    {
+      "family": "aspect_gradient_ab",
+      "evidence_id": "STELLAR-GRAD-ASPECT-AB-001",
+      "run": "runs/grad_campaign",
+      "arms": 5,
+      "cost_usd": 14.4555,
+      "paired_honest_deltas": [-0.00199, 0.00288],
+      "conclusion": "Null and underpowered at n=2; it tested an aspect-only boundary gradient, not the solver objective/QI gradient. Writers used 0.002-0.004 caps, about 100x beyond the later measured trust region.",
+      "sources": [
+        "runs/grad_campaign/state.json",
+        "docs/history/decisions.md"
+      ]
+    },
+    {
+      "family": "fd_solver_gradient_polish",
+      "evidence_id": "STELLAR-GRAD-FD-POLISH-001",
+      "run": "runs/qi_polish",
+      "steps": 17,
+      "solves": 715,
+      "vlf_honest_start": 0.619963,
+      "vlf_honest_end": 0.622759,
+      "official_start": 0.632082,
+      "official_end": 0.634038,
+      "official_gain": 0.001956,
+      "transfer_ratio": 0.7,
+      "conclusion": "A real local improvement that transferred across fidelity and ended in trust-region collapse. The project contains competing causal diagnoses: QI projection, search-only margin shaping, and a later relaxed-margin ceiling result that disputes the shaping explanation. It is evidence for local polishing and an observed stall, not for a settled stall mechanism or basin discovery.",
+      "sources": [
+        "runs/qi_polish/state.json",
+        "runs/qi_polish/transfer.json",
+        "docs/history/decisions.md"
+      ]
+    },
+    {
+      "family": "transform_frontier_fidelity_audit",
+      "evidence_id": "STELLAR-STRUCT-FIDELITY-001",
+      "run": "runs/transform-frontier",
+      "source_official_score": 0.6416809231644797,
+      "cases": [
+        {
+          "vlf_delta": 0.01363426690574887,
+          "official_delta": -0.0016630716973239368
+        },
+        {
+          "vlf_delta": 0.013602918261412245,
+          "official_delta": -0.0007058859472229839
+        }
+      ],
+      "conclusion": "Activating new high-order modes exploited coarse resolution; the large VLF gains reversed at official fidelity.",
+      "sources": [
+        "runs/transform-frontier/report.json",
+        "runs/transform-frontier/official.json",
+        "docs/history/decisions.md"
+      ]
+    },
+    {
+      "family": "independent_structural_census",
+      "evidence_id": "STELLAR-STRUCT-CENSUS-001",
+      "reports": 9,
+      "jobs": 68,
+      "evaluated": 35,
+      "failed": 33,
+      "promotable": 0,
+      "conclusion": "NAE, ellipse, and NAE-axis constructors remained catastrophic or nonconvergent; none reached the LF promotion corridor.",
+      "source_globs": [
+        "runs/structural-census*/report.json",
+        "runs/structural-live-census-*/report.json"
+      ]
+    },
+    {
+      "family": "research_harness_shadow",
+      "runs": [
+        "runs/stellar-research-shadow-1",
+        "runs/stellar-research-shadow-2",
+        "runs/stellar-research-shadow-3",
+        "runs/stellar-research-opus-fable-1",
+        "runs/stellar-research-24h-fable-glm52-1"
+      ],
+      "conclusion": "The multi-agent harness improved claim checking, provenance, and experiment selection but produced no physics candidate or score. Its strongest scientific diagnosis was the independent arm's edge-mirror transfer wall.",
+      "sources": [
+        "runs/stellar-research-shadow-3/SHADOW_REPORT.md",
+        "runs/stellar-research-shadow-3/ROUND6_7_SYNTHESIS.md",
+        "runs/stellar-research-opus-fable-1/SHADOW_REPORT.md"
+      ]
+    }
+  ],
+  "plot_series": {
+    "notes": "Series are grouped by comparable experiment family. Do not connect unaided construction, imported-database repair, and inherited public-seed refinement into one trajectory.",
+    "unaided_construction_terminal_worst_violation": [
+      {
+        "run": "runs/stellar_p2-s42-27282945",
+        "value": 0.519,
+        "fidelity": "search/legacy",
+        "approximate": true
+      },
+      {
+        "run": "runs/stellar_p2-s7-30186401",
+        "value": 0.517,
+        "fidelity": "search/legacy",
+        "approximate": true
+      },
+      {
+        "run": "runs/stellar_p2-s11-38566380",
+        "value": 0.4252589812774451,
+        "fidelity": "search/legacy",
+        "approximate": false
+      },
+      {
+        "run": "runs/stellar-zai-persistent-1",
+        "value": 0.562452172890736,
+        "fidelity": "very_low_fidelity",
+        "approximate": false
+      }
+    ],
+    "database_repair_acceptance_milestones": {
+      "run": "runs/stellar-zai-repair-2",
+      "lineage_warning": "Accepted milestones can switch among imported/self-generated seeds and are not one boundary lineage.",
+      "points": [
+        {"round": 4, "worst_violation": 0.546108004245504, "objective_L": 4.52970829644872},
+        {"round": 8, "worst_violation": 0.18578692417592854, "objective_L": 6.267884717453106},
+        {"round": 9, "worst_violation": 0.1489837630612647, "objective_L": 6.366544549967086},
+        {"round": 10, "worst_violation": 0.14640111492292607, "objective_L": 6.558935377876012},
+        {"round": 19, "worst_violation": 0.11806642320312632, "objective_L": 6.382046452820238},
+        {"round": 23, "worst_violation": 0.054968931729066084, "objective_L": 3.78069060337135},
+        {"round": 27, "worst_violation": 0.04891795293170867, "objective_L": 3.7050587869008913},
+        {"round": 32, "worst_violation": 0.04669423410869955, "objective_L": 3.909897931882653},
+        {"round": 34, "worst_violation": 0.04615017064624319, "objective_L": 3.9413642631510735},
+        {"round": 93, "worst_violation": 0.04070152609620237, "objective_L": 3.581471424507232},
+        {"round": 212, "worst_violation": 0.04070152608757205, "objective_L": 3.5814714242521344}
+      ]
+    },
+    "fd_polish_transfer": [
+      {"stage": "start", "vlf_honest": 0.619963, "official_score": 0.632082},
+      {"stage": "end", "vlf_honest": 0.622759, "official_score": 0.634038}
+    ],
+    "transform_fidelity_reversal": [
+      {"case": "band_seed_3", "vlf_delta": 0.01363426690574887, "official_delta": -0.0016630716973239368},
+      {"case": "band_seed_5", "vlf_delta": 0.013602918261412245, "official_delta": -0.0007058859472229839}
+    ]
+  },
+  "feedback_lessons": [
+    {
+      "mechanism": "raw official scalar",
+      "worked": "Provides the actual competition objective after clean-room official evaluation.",
+      "failed": "Rewards consuming the full 1% feasibility tolerance and made a near-copy look better than the public leader.",
+      "fix": "Track honest score, raw score, feasibility, bank distance, and bank cosine together."
+    },
+    {
+      "mechanism": "shared memory wiki",
+      "worked": "Recorded repeated dead ends and implementation hazards across runs.",
+      "failed": "Pages can lag newer persistent runs, and shared reviews can interleave; the current index still foregrounds the older 0.6400 result.",
+      "fix": "Treat memory as hypotheses and navigation; recompute claims from run artifacts."
+    },
+    {
+      "mechanism": "gradient feedback",
+      "worked": "Pinned-solver FD gradients produced a small official local gain at caps around 3e-5.",
+      "failed": "Aspect-only tools, large caps, solver-version sidecars, and gradients used as structural search all failed or optimized the wrong surface.",
+      "fix": "Use gradients as a local operator with re-linearization and official transfer checks, while structural search supplies new basins."
+    },
+    {
+      "mechanism": "quality diversity and bandit forks",
+      "worked": "Preserved alternative behavior cells and made provenance explicit.",
+      "failed": "On stellarator runs they frequently returned the resumed seed or an inherited stochastic private boundary; they did not solve candidate generation.",
+      "fix": "Measure generation-vs-selection gaps and require independent construction plus fidelity promotion."
+    },
+    {
+      "mechanism": "prediction contracts and analyst/refiner roles",
+      "worked": "Made proposed mechanisms falsifiable and preserved why a candidate was tried.",
+      "failed": "Confident predictions were often wrong, and repeated API/audit failures consumed evaluations.",
+      "fix": "Score calibration and protocol compliance separately from physical outcome."
+    }
+  ],
+  "claim_policy": {
+    "historical_score_claim": "State provenance, fidelity, feasibility, tolerance use, novelty metrics, and evaluator-fingerprint status.",
+    "independence_claim": "Distinguish unaided NAE/ellipse, scientific-database repair, self-generated repair, and public-leaderboard inheritance.",
+    "latest_claim": "The latest persisted database-repair artifact is infeasible at VLF with 0.04070 worst violation. It uses imported scientific configurations/self-generated seeds and is neither unaided nor a public-leaderboard refinement. No unaided or database-repair arm has an official positive P2 score.",
+    "novelty_claim": "bank_dist >= 0.001 alone is insufficient; cosine 0.999998-0.99999 demonstrates near-copy structure.",
+    "completion_claim": "A run is complete only with a terminal event/report or explicit halt reason. The host steward's repeated relaunch log does not mean useful work is active."
+  }
+}

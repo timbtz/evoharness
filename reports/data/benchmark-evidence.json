@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "extracted_on": "2026-09-17",
+  "repository_head": "9d6681da7e6f227c0e30e51c4b38651df6fd3ee1",
+  "notes": [
+    "Higher repository score is better for every task, but units differ by task.",
+    "Bin-packing scores are negative fractional excess; TSP and CVRP scores are negative percentage-point gaps.",
+    "Run endpoints are not pooled across evaluator or split revisions."
+  ],
+  "score_definitions": {
+    "binpacking": {
+      "score": "-mean_fractional_excess_over_L1",
+      "human_metric": "excess_pct",
+      "conversion": "excess_pct = -100 * score",
+      "source_path": "tasks/binpacking/task.py"
+    },
+    "circles": {
+      "score": "sum_radii",
+      "human_metric": "sum_radii",
+      "source_path": "tasks/circles/task.py"
+    },
+    "tsp": {
+      "score": "-mean_gap_pct",
+      "human_metric": "gap_pct",
+      "conversion": "gap_pct = -score",
+      "source_path": "tasks/tsp/task.py"
+    },
+    "matmul_c": {
+      "score": "geometric_mean_same_binary_speedup_vs_naive",
+      "human_metric": "speedup_x",
+      "source_path": "tasks/matmul_c/task.py"
+    },
+    "cvrp": {
+      "score": "-mean_gap_pct_to_BKS",
+      "human_metric": "gap_pct",
+      "conversion": "gap_pct = -score",
+      "source_path": "tasks/cvrp/task.py"
+    }
+  },
+  "studies": [
+    {
+      "id": "initial_binpacking_5_axis_factorial",
+      "task": "binpacking",
+      "evidence_grade": "factorial_three_seeds",
+      "design": {
+        "configurations": 32,
+        "seeds_per_configuration": 3,
+        "finished_runs": 96,
+        "calls_per_run": 20,
+        "balanced": true
+      },
+      "private_score_summary": {
+        "n": 96,
+        "mean": -0.03947299025818317,
+        "min": -0.18217850220294743,
+        "max": -0.011480710249303066
+      },
+      "main_effects": [
+        {"axis": "feedback", "a": "score_only", "a_mean": -0.04034395421232768, "b": "reflections", "b_mean": -0.03860202630403875, "delta_b_minus_a": 0.0017419279082889275, "n_a": 48, "n_b": 48},
+        {"axis": "gate", "a": "public_only", "a_mean": -0.03843439595213928, "b": "holdout", "b_mean": -0.04051158456422715, "delta_b_minus_a": -0.002077188612087867, "n_a": 48, "n_b": 48},
+        {"axis": "search", "a": "greedy", "a_mean": -0.04107478492119605, "b": "islands", "b_mean": -0.037871195595170375, "delta_b_minus_a": 0.0032035893260256784, "n_a": 48, "n_b": 48},
+        {"axis": "knowledge", "a": "off", "a_mean": -0.043657254672552555, "b": "wiki_fs", "b_mean": -0.03528872584381387, "delta_b_minus_a": 0.008368528828738682, "n_a": 48, "n_b": 48},
+        {"axis": "roles", "a": "single_strong", "a_mean": -0.03683121313102188, "b": "split_roles", "b_mean": -0.042114767385344545, "delta_b_minus_a": -0.005283554254322663, "n_a": 48, "n_b": 48}
+      ],
+      "confounders": [
+        "Only bin packing and a 20-call budget were tested.",
+        "No confidence intervals or interaction estimates were recorded.",
+        "Many configurations ended at the seed score."
+      ],
+      "source_paths": [
+        "docs/history/initial-screening.md",
+        "docs/analysis/data/screening-binpacking.csv",
+        "runs/screening/binpacking"
+      ]
+    },
+    {
+      "id": "initial_tsp_5_axis_screening_inventory",
+      "task": "tsp",
+      "evidence_grade": "posthoc_failure_excluded_factorial_diagnostic",
+      "design": {
+        "ledger_count": 96,
+        "finite_endpoint_count": 95,
+        "failure_sentinel_count": 1,
+        "failure_sentinel_serialization": "-Infinity",
+        "failure_sentinel_source_path": "runs/screening/tsp/10101-s1/ledger.jsonl",
+        "nominal_max_calls": 20,
+        "observed_call_count": {
+          "min": 7,
+          "max": 20,
+          "mean": 18.322916666666668,
+          "runs_reaching_20": 72,
+          "runs_stopping_on_time": 24,
+          "distribution": [
+            {"calls": 7, "n": 1},
+            {"calls": 8, "n": 3},
+            {"calls": 10, "n": 1},
+            {"calls": 11, "n": 1},
+            {"calls": 12, "n": 3},
+            {"calls": 13, "n": 4},
+            {"calls": 14, "n": 3},
+            {"calls": 15, "n": 2},
+            {"calls": 17, "n": 3},
+            {"calls": 18, "n": 1},
+            {"calls": 19, "n": 2},
+            {"calls": 20, "n": 72}
+          ]
+        }
+      },
+      "failure_excluded_private_score_summary": {
+        "n": 95,
+        "mean": -4.562411355699777,
+        "min": -11.50545084971052,
+        "max": -0.8568407585073594
+      },
+      "failure_excluded_arm_means": [
+        {"axis": "feedback", "option": "score_only", "n": 48, "failures": 0, "mean": -4.330280330985789},
+        {"axis": "feedback", "option": "reflections", "n": 47, "failures": 1, "mean": -4.799481338386404},
+        {"axis": "gate", "option": "public_only", "n": 47, "failures": 1, "mean": -4.108450222808137},
+        {"axis": "gate", "option": "holdout", "n": 48, "failures": 0, "mean": -5.006914964989507},
+        {"axis": "search", "option": "greedy", "n": 48, "failures": 0, "mean": -4.073719019616043},
+        {"axis": "search", "option": "islands", "n": 47, "failures": 1, "mean": -5.061501401061888},
+        {"axis": "knowledge", "option": "off", "n": 47, "failures": 1, "mean": -5.151915210841746},
+        {"axis": "knowledge", "option": "wiki_fs", "n": 48, "failures": 0, "mean": -3.9851888308732657},
+        {"axis": "roles", "option": "single_strong", "n": 48, "failures": 0, "mean": -4.864860098382491},
+        {"axis": "roles", "option": "split_roles", "n": 47, "failures": 1, "mean": -4.253527533385516}
+      ],
+      "confounders": [
+        "Failure-excluded arm means are unbalanced because one failed endpoint is excluded.",
+        "Only 72 of 96 runs reached 20 calls; 24 stopped on the 900-second cap after 7-19 calls.",
+        "This corpus was not summarized in the original initial-screening report.",
+        "No confidence intervals or interaction estimates were recorded."
+      ],
+      "source_paths": ["runs/screening/tsp"]
+    },
+    {
+      "id": "m1_binpacking_live_run",
+      "task": "binpacking",
+      "evidence_grade": "single_run",
+      "run": "m1-binpacking",
+      "seed_train_score": -0.0459013743596466,
+      "seed_train_excess_pct": 4.59,
+      "best_id": "c0046",
+      "best_train_score": -0.01829024226111688,
+      "best_train_excess_pct": 1.829,
+      "private_score": -0.013792318609372124,
+      "private_excess_pct": 1.379,
+      "calls": 60,
+      "usd": 0.1492,
+      "source_paths": ["runs/m1-binpacking/ledger.jsonl"]
+    },
+    {
+      "id": "m1_matmul_c_live_run",
+      "task": "matmul_c",
+      "evidence_grade": "single_run",
+      "run": "m1-matmul-c",
+      "seed_train_speedup_x": 0.9886,
+      "best_id": "c0013",
+      "best_train_speedup_x": 15.0891,
+      "private_speedup_x": 16.0605,
+      "private_per_size_speedups_x": [13.111, 19.673],
+      "private_sizes": [128, 512],
+      "calls": 20,
+      "usd": 0.143,
+      "confounders": [
+        "Speedup is against a naive loop, not optimized BLAS.",
+        "One run does not estimate success probability or timing variance.",
+        "Same-binary timing reduces but does not eliminate machine effects."
+      ],
+      "source_paths": ["runs/m1-matmul-c/ledger.jsonl", "tasks/matmul_c/task.py"]
+    },
+    {
+      "id": "qd_gate_search_2x2_seed1",
+      "tasks": ["binpacking", "tsp"],
+      "evidence_grade": "paired_single_seed_factorial",
+      "design": {
+        "seed": 1,
+        "gate_options": ["holdout", "quality_diversity"],
+        "search_options": ["staged", "bandit_fork"],
+        "runs_per_task": 4,
+        "total_recorded_usd": 1.783
+      },
+      "runs": [
+        {"task": "binpacking", "gate": "holdout", "search": "staged", "private_score": -0.01575397828457856, "private_excess_pct": 1.575397828457856, "calls": 40, "usd": 0.1567, "source_path": "runs/qdab-binpacking-holdout-staged-s1/ledger.jsonl"},
+        {"task": "binpacking", "gate": "holdout", "search": "bandit_fork", "private_score": -0.023701275892800404, "private_excess_pct": 2.3701275892800404, "calls": 40, "usd": 0.1427, "source_path": "runs/qdab-binpacking-holdout-bandit_fork-s1/ledger.jsonl"},
+        {"task": "binpacking", "gate": "quality_diversity", "search": "staged", "private_score": -0.010368923832830678, "private_excess_pct": 1.0368923832830678, "calls": 40, "usd": 0.1388, "source_path": "runs/qdab-binpacking-quality_diversity-staged-s1/ledger.jsonl"},
+        {"task": "binpacking", "gate": "quality_diversity", "search": "bandit_fork", "private_score": -0.009585926069967143, "private_excess_pct": 0.9585926069967143, "calls": 40, "usd": 0.138, "source_path": "runs/qdab-binpacking-quality_diversity-bandit_fork-s1/ledger.jsonl"},
+        {"task": "tsp", "gate": "holdout", "search": "staged", "private_score": -4.936385232727651, "private_gap_pct": 4.936385232727651, "calls": 21, "usd": 0.3105, "source_path": "runs/qdab-tsp-holdout-staged-s1/ledger.jsonl"},
+        {"task": "tsp", "gate": "holdout", "search": "bandit_fork", "private_score": -0.8056339765944502, "private_gap_pct": 0.8056339765944502, "calls": 18, "usd": 0.3137, "source_path": "runs/qdab-tsp-holdout-bandit_fork-s1/ledger.jsonl"},
+        {"task": "tsp", "gate": "quality_diversity", "search": "staged", "private_score": -0.8334801033422533, "private_gap_pct": 0.8334801033422533, "calls": 22, "usd": 0.2822, "source_path": "runs/qdab-tsp-quality_diversity-staged-s1/ledger.jsonl"},
+        {"task": "tsp", "gate": "quality_diversity", "search": "bandit_fork", "private_score": -3.3174088825809043, "private_gap_pct": 3.3174088825809043, "calls": 29, "usd": 0.3004, "source_path": "runs/qdab-tsp-quality_diversity-bandit_fork-s1/ledger.jsonl"}
+      ],
+      "confounders": [
+        "Only one seed was run.",
+        "TSP arms had unequal calls and different binding stop limits.",
+        "Strong gate-by-search interaction prevents a simple main-effect ranking."
+      ],
+      "source_paths": ["runs/qd-ab/RESULT.md"]
+    },
+    {
+      "id": "cvrp_memory_vs_score_only_seed3",
+      "task": "cvrp",
+      "evidence_grade": "paired_configuration_single_seed",
+      "shared_configuration": {
+        "seed": 3,
+        "resume_from": "cvrp-s0-43507138",
+        "gate": "holdout",
+        "search": "staged",
+        "knowledge": "off",
+        "roles": "single_strong",
+        "max_usd": 4
+      },
+      "arms": [
+        {"feedback": "score_only", "run": "cvrp-s3-51556548", "best_id": "c0033r1", "private_score": -0.7475657085848356, "private_gap_pct": 0.748, "calls": 96, "usd": 4.0165, "seconds": 8405.1},
+        {"feedback": "memory", "run": "cvrp-s3-45465035", "best_id": "c0035", "private_score": -0.5806637906329615, "private_gap_pct": 0.581, "calls": 165, "usd": 4.0831, "seconds": 5951.3}
+      ],
+      "observed_gap_reduction_percentage_points_from_raw_scores": 0.16690191795187415,
+      "observed_relative_gap_reduction_from_raw_scores": 0.22326053219833278,
+      "confounders": [
+        "One seed and one run per arm.",
+        "Reviewer calls make total call counts unequal.",
+        "The shared wiki accumulated evidence over wall-clock time, so run order matters.",
+        "Anytime CVRP evaluation has measured wall-clock-coupled noise."
+      ],
+      "source_paths": [
+        "runs/cvrp-s3-51556548/ledger.jsonl",
+        "runs/cvrp-s3-45465035/ledger.jsonl",
+        "docs/history/decisions.md",
+        "memory/cvrp/performance-analysis/score-noise-and-gate.md"
+      ]
+    }
+  ],
+  "task_coverage": {
+    "circles": {
+      "historical_run_ledger_present": false,
+      "evidence_grade": "evaluator_only",
+      "derived_seed_sum_radii": 2.1640666666666666,
+      "approximate_reference_target": 2.635,
+      "derived_seed_target_ratio_approx": 0.8213,
+      "source_paths": ["tasks/circles/task.py"]
+    },
+    "cvrp": {
+      "top_level_ledger_count_including_smoke_and_incomplete": 20,
+      "evidence_grade": "longitudinal_posthoc",
+      "representative_endpoints": [
+        {"run": "cvrp-s3-45465035", "best_id": "c0035", "private_gap_pct": 0.581, "source_path": "runs/cvrp-s3-45465035/ledger.jsonl"},
+        {"run": "cvrp-s17-78412700", "best_id": "c0020", "private_gap_pct": 0.635, "private_all_scores": [-0.5644, -0.7403, -0.635], "source_path": "runs/cvrp-s17-78412700/ledger.jsonl"},
+        {"run": "cvrp-s37-18214945", "best_id": "c0021", "private_gap_pct": 0.607296253999557, "source_path": "runs/cvrp-s37-18214945/ledger.jsonl"}
+      ],
+      "known_measurement_confounds": [
+        "Train, validation, and private split composition changed during development.",
+        "Same-code train variation reached about 0.09 percentage points and private spreads reached 0.10-0.18 points.",
+        "Run-end private evaluation changed from single evaluation to median-of-three.",
+        "Shared memory and resumed ancestry make later runs dependent on earlier runs.",
+        "External Docker image pruning caused false negative-infinity evaluations in one run."
+      ],
+      "source_paths": [
+        "memory/cvrp/index.md",
+        "memory/cvrp/performance-analysis/run-metrics.md",
+        "memory/cvrp/performance-analysis/score-noise-and-gate.md",
+        "memory/cvrp/performance-analysis/instance-structure.md"
+      ]
+    }
+  }
+}

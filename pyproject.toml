@@ -1,7 +1,8 @@
 [project]
 name = "evoharness"
 version = "0.1.0"
-description = "Modular LLM code-evolution optimizer: 5 swappable design axes, 3 PoC tasks"
+description = "Agentic optimization research harness with modular search, evaluator feedback, and stellarator discovery experiments"
+license-files = ["NOTICE.md"]
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.40",
@@ -11,11 +12,29 @@ dependencies = [
     "tsplib95>=0.7.1",
 ]
 
+[project.scripts]
+evoharness = "evoharness.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
 [dependency-groups]
 dev = ["pytest>=8.0", "httpx>=0.27"]
+analysis = ["matplotlib>=3.9"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.uv]
-package = false
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evoharness"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"configs" = "evoharness/resources/configs"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/evoharness", "configs", "pyproject.toml", "README.md", "NOTICE.md"]
