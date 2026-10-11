@@ -1,0 +1,459 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-10-11",
+  "source_revision": "a855ae57b45796d57dc57ad84daee263f90c2196",
+  "scope": "Source and archived-artifact audit; no new model calls, solver runs or numerical parity tests. Raw .local sources are gitignored and may be unavailable in a fresh clone.",
+  "source_hash_algorithm": "sha256",
+  "sources": {
+    "task": {
+      "path": "src/evoharness/tasks/stellar_p2/task.py",
+      "sha256": "f53d3dc5a03c32fc6694ddac8a92e6a6cf488bf7f3346cbf5b04843afcb2247b",
+      "tracked_source": true
+    },
+    "polish": {
+      "path": "src/evoharness/tasks/stellar_p2/physics/polish.py",
+      "sha256": "50f9183698f0c1e7b535251894665ffb04ed9269a4f73f5ced7baaafea2766f5",
+      "tracked_source": true
+    },
+    "gradient_service": {
+      "path": "src/evoharness/tasks/stellar_p2/physics/metrics/boundary_grad.py",
+      "sha256": "d7fee894a60b4d139e8dc935050ac1eae12c36027c0e4b7f5e36de2fbfe80abf",
+      "tracked_source": true
+    },
+    "mirror": {
+      "path": "src/evoharness/tasks/stellar_p2/physics/metrics/mirror_jax.py",
+      "sha256": "be1bb85c658c67f81d3ca3455fb4d311a263981b42f6fd737e93b29d762b5877",
+      "tracked_source": true
+    },
+    "feasibility": {
+      "path": "src/evoharness/tasks/stellar_p2/physics/metrics/feasibility.py",
+      "sha256": "5e0310972fad5475e7d09e723a6788627216373bfcfc847516f5ce20ef911f62",
+      "tracked_source": true
+    },
+    "evidence": {
+      "path": "src/evoharness/tasks/stellar_p2/discovery/evidence.py",
+      "sha256": "438087b129b42ef445d1acfcc85a6e0e0c30a0ed51b736995fd3cac60a984d12",
+      "tracked_source": true
+    },
+    "repair": {
+      "path": "src/evoharness/tasks/stellar_p2/workflows/repair.py",
+      "sha256": "4190a4bed52dbc75915f12434819f28c700f0a7957f429d14a87c42be3422a80",
+      "tracked_source": true
+    },
+    "history": {
+      "path": ".local/archive/docs/history/decisions.md",
+      "sha256": "d37da7f86de677d24366db9171b8384e2f1a76ebb801cc506d0c275b73a69553",
+      "tracked_source": false
+    },
+    "operations": {
+      "path": ".local/notebooks/04-operations.md",
+      "sha256": "d7b88f3b3a51d12e6caaeca74b6e6db0eed172cf1f0f25ab54d0fe9f312bc66a",
+      "tracked_source": false
+    },
+    "logbook": {
+      "path": ".local/notebooks/logbook.md",
+      "sha256": "0f76396d89a424aecd409249cf5fdd50b38b8e5cd60b94a32f7a5bdc634d711a",
+      "tracked_source": false
+    },
+    "restart_pairs": {
+      "path": ".local/runs/hot_restart_bench2.jsonl",
+      "sha256": "c4ed369a921e7ad46bd214d57295dec8ac868b8829b9a96f524711028c299f28",
+      "tracked_source": false
+    },
+    "polish_transfer": {
+      "path": ".local/runs/qi_polish/transfer.json",
+      "sha256": "ecb96c20b74528b336e37152aece8340e67405b9466a926f3527f4dc5b32e6cc",
+      "tracked_source": false
+    },
+    "qidesc_platform": {
+      "path": ".local/runs/qidesc-platform/state.json",
+      "sha256": "903be9743a7bf48d75571da3d9459a0969ff8024235445bb9ed379f0534b76ca",
+      "tracked_source": false
+    },
+    "goodman_repair": {
+      "path": ".local/runs/goodman-repair/state.json",
+      "sha256": "e435d73e4083c6bc090c6b8ba3cd7e4d3a145b857bfdd6aff056f5ef661b9569",
+      "tracked_source": false
+    },
+    "goodman2_repair": {
+      "path": ".local/runs/goodman2-repair/state.json",
+      "sha256": "e2f504030ebe8a3811b9657addeb85f415c4a7d5d131b1998a3e0239b6ec8f16",
+      "tracked_source": false
+    },
+    "repair2": {
+      "path": ".local/runs/stellar-zai-repair-2/state.json",
+      "sha256": "da744ccef0a92baa44b3bdd7dc6394fe65a5161349e2176b58a17caf15a59c57",
+      "tracked_source": false
+    }
+  },
+  "code_inspection": [
+    {
+      "id": "scope",
+      "summary": "Optimization, metric and feedback extensions surround the pinned solver; training invocation is patched, while independent boundary-only verification retains cold, strict evaluation.",
+      "sources": [
+        "task",
+        "history"
+      ]
+    },
+    {
+      "id": "infeasible_signal",
+      "summary": "Converged infeasible boundaries receive negative maximum normalized violation instead of the official zero score, providing a selection signal below feasibility.",
+      "sources": [
+        "task"
+      ],
+      "official_gate": 0.01
+    },
+    {
+      "id": "residual_signal",
+      "summary": "Nonconverged training solves expose force residuals, tolerance and iteration count; logarithmic sentinels in [-1001,-1000] are not accepted as converged results or archived. Fatal early VMEC failures can still return no graded result.",
+      "sources": [
+        "task"
+      ]
+    },
+    {
+      "id": "margin_and_novelty",
+      "summary": "Search-side shaping penalizes feasibility tolerance consumption and closeness to public seeds; raw official score is retained separately. Seed distance is scale-normalized and cosine similarity is also reported.",
+      "sources": [
+        "task"
+      ],
+      "margin_target": 0.002,
+      "margin_slope": 0.92
+    },
+    {
+      "id": "geometry",
+      "summary": "Exact aspect, aspect-gradient and Newton margin-step tools operate directly on boundary coefficients without equilibrium solves.",
+      "sources": [
+        "task"
+      ]
+    },
+    {
+      "id": "hybrid_gradient",
+      "summary": "JAX derivatives of downstream objective/QI/mirror metrics are contracted with central finite differences of equilibrium/Boozer arrays. This is not a VMEC adjoint.",
+      "sources": [
+        "polish",
+        "gradient_service"
+      ],
+      "default_coefficients": 20,
+      "default_nominal_gradient_solves": 41
+    },
+    {
+      "id": "mirror",
+      "summary": "Mirror derivatives reuse existing bmnc finite-difference columns, adding no equilibrium solves.",
+      "sources": [
+        "polish",
+        "mirror"
+      ]
+    },
+    {
+      "id": "elongation",
+      "summary": "Boundary-direct elongation derivative freezes the magnetic axis at the base solution, adding no equilibrium solves but omitting axis response.",
+      "sources": [
+        "polish",
+        "gradient_service"
+      ]
+    },
+    {
+      "id": "joint_repair",
+      "summary": "Feasibility mode combines normalized aspect, QI, mirror and elongation gradients for near-tied violations; equal-descent minimum-norm direction solves A s = -1. Each proposed step is re-evaluated and accepted only if maximum violation decreases.",
+      "sources": [
+        "polish"
+      ]
+    },
+    {
+      "id": "incumbent_acceptance",
+      "summary": "Acceptance compares against the last accepted incumbent, not the previous rejected trial; best boundary is persisted separately.",
+      "sources": [
+        "polish"
+      ]
+    },
+    {
+      "id": "composite_objective",
+      "summary": "Objective polish follows score minus margin penalty where reliable derivatives exist; joint projection is used for the conservative fallback. Search margin target is configurable.",
+      "sources": [
+        "polish",
+        "task"
+      ]
+    },
+    {
+      "id": "feedback_first",
+      "summary": "Structured measured evidence is placed before background prose; recent outcomes, family failure counts and active constraints precede a 12000-character cutoff. Persistent repair prompts include measured history and incumbent program.",
+      "sources": [
+        "evidence",
+        "repair"
+      ]
+    }
+  ],
+  "measurements": [
+    {
+      "id": "restart_benchmark",
+      "summary": "Statistics recomputed from stored paired raw benchmark rows; no physics rerun.",
+      "sources": [
+        "restart_pairs"
+      ],
+      "variants": {
+        "single_stage": {
+          "paired_cases": 31,
+          "identical_metric_dicts": 24,
+          "max_abs_objective_L_drift": 0.04180904707939348,
+          "median_cold_to_variant_time_ratio": 1.3407576852141496,
+          "nonidentical_case_indices": [
+            4,
+            8,
+            13,
+            17,
+            18,
+            19,
+            21
+          ]
+        },
+        "true_restart": {
+          "paired_cases": 31,
+          "identical_metric_dicts": 10,
+          "max_abs_objective_L_drift": 3.7559600247310563,
+          "median_cold_to_variant_time_ratio": 1.3524657072839483,
+          "nonidentical_case_indices": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            12,
+            13,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            23,
+            24,
+            28,
+            29
+          ]
+        }
+      }
+    },
+    {
+      "id": "gradient_transfer",
+      "summary": "Archived low-fidelity polish and separate official re-evaluation; one trajectory, not a controlled estimate of general benefit.",
+      "sources": [
+        "polish_transfer"
+      ],
+      "vlf_steps_accepted": 11,
+      "solves": 715,
+      "trust": 4.11522633744856e-08,
+      "cases": [
+        {
+          "case": "step0_champion",
+          "vlf_honest": 0.6199628453762763,
+          "official_score": 0.6320817392890348,
+          "official_feasibility": 0.004728181290977185,
+          "error": null,
+          "wall_s": 112.5
+        },
+        {
+          "case": "polished",
+          "vlf_honest": 0.6227586623086854,
+          "official_score": 0.6340376301825748,
+          "official_feasibility": 0.004361213449813106,
+          "error": null,
+          "wall_s": 115.7
+        }
+      ],
+      "delta_vlf": 0.0027958169324090454,
+      "delta_official": 0.00195589089353998,
+      "transferred": true
+    },
+    {
+      "id": "qidesc_platform",
+      "summary": "Archived feasibility-repair trajectory; all reported endpoints remain infeasible relative to the 0.01 gate.",
+      "sources": [
+        "qidesc_platform"
+      ],
+      "steps": 43,
+      "solves": 4215,
+      "accepted_steps": 31,
+      "initial_violation": 0.5584922900399713,
+      "best_accepted_violation": 0.46561842822689536,
+      "initial_L": 13.67394836549983,
+      "best_accepted_L": 13.369493417242136,
+      "best_step": 42,
+      "best_active": [
+        "jd-qi",
+        "jd-mirror",
+        "cos=-0.805",
+        "hold-aspect"
+      ]
+    },
+    {
+      "id": "goodman_repair",
+      "summary": "Archived feasibility-repair trajectory; all reported endpoints remain infeasible relative to the 0.01 gate.",
+      "sources": [
+        "goodman_repair"
+      ],
+      "steps": 21,
+      "solves": 1259,
+      "accepted_steps": 13,
+      "initial_violation": 0.2086703552118024,
+      "best_accepted_violation": 0.15091060784642157,
+      "initial_L": 6.092178725246669,
+      "best_accepted_L": 6.094687202966615,
+      "best_step": 20,
+      "best_active": [
+        "jd-qi",
+        "jd-mirror",
+        "jd-elongation",
+        "hold-aspect"
+      ]
+    },
+    {
+      "id": "goodman2_repair",
+      "summary": "Archived feasibility-repair trajectory; all reported endpoints remain infeasible relative to the 0.01 gate.",
+      "sources": [
+        "goodman2_repair"
+      ],
+      "steps": 6,
+      "solves": 397,
+      "accepted_steps": 0,
+      "initial_violation": 0.14640111492292607,
+      "best_accepted_violation": 0.14640111492292607,
+      "initial_L": 6.558935377876012,
+      "best_accepted_L": 6.558935377876012,
+      "best_step": 0,
+      "best_active": []
+    },
+    {
+      "id": "repair2_latest",
+      "summary": "Later persistent LLM repair result, distinct from gradient intervention and not evidence of a gradient-only effect.",
+      "sources": [
+        "repair2"
+      ],
+      "round": 694,
+      "best_selection_score": -0.04070152608757205,
+      "best_violation": 0.04070152608757205,
+      "officially_feasible": false
+    }
+  ],
+  "notebook_reported_evidence": [
+    {
+      "id": "mirror_parity",
+      "summary": "Notebook reports mirror metric parity over 12 cached boundaries and gradient agreement; this audit did not execute parity tests.",
+      "sources": [
+        "logbook",
+        "operations"
+      ],
+      "max_metric_abs_error": 3.1e-16,
+      "max_gradient_relative_error": 5.4e-09
+    },
+    {
+      "id": "elongation_check",
+      "summary": "Notebook reports 1.0-1.3% central-FD relative error with correct signs on two sensitive coefficients of the Goodman nfp2 boundary; this does not make the frozen-axis derivative exact.",
+      "sources": [
+        "operations"
+      ],
+      "relative_error_range": [
+        0.01,
+        0.013
+      ]
+    },
+    {
+      "id": "aspect_check",
+      "summary": "Decision archive reports aspect parity across 196 boundaries and analytic gradient agreement with central FD; tests were not rerun.",
+      "sources": [
+        "history"
+      ],
+      "aspect_linf": 1e-13,
+      "gradient_error": 1.2e-09
+    }
+  ],
+  "corrections_and_limits": [
+    {
+      "id": "not_all_five_gradients",
+      "summary": "Notebook phrase all five gradients overstates code: aspect, QI, mirror and elongation directions exist; iota remains measured and verified without an implemented boundary derivative.",
+      "sources": [
+        "logbook",
+        "polish",
+        "gradient_service"
+      ]
+    },
+    {
+      "id": "frozen_axis_limit",
+      "summary": "Notebook phrase full-quality not advisory overstates generality: source explicitly freezes the magnetic axis and omits its response.",
+      "sources": [
+        "operations",
+        "gradient_service",
+        "polish"
+      ]
+    },
+    {
+      "id": "stale_projection_note",
+      "summary": "Notebook claim that standalone polish still uses sequential projection is stale; current code contains a joint Gram-system projection and equal-descent repair.",
+      "sources": [
+        "operations",
+        "polish"
+      ]
+    },
+    {
+      "id": "search_penalty_not_physics_wall",
+      "summary": "Aug13 adjudication corrected Aug10a: trust collapse was attributed to the search-only margin_target=.002 shaping penalty, not demonstrated official QI infeasibility; the scalar ceiling was untested in that adjudication.",
+      "sources": [
+        "history",
+        "polish"
+      ]
+    },
+    {
+      "id": "foreign_jacobian",
+      "summary": "Aug10c corrected the earlier 1-of-3 sign test because it varied both solver Jacobian and downstream functional. Archived isolated cross-version d(wout)/dp disagreement was 13-34%, below the pinned FD estimator truncation estimate of 27-44%. A foreign Jacobian was not categorically excluded; foreign downstream metrics cannot replace pinned scoring authority.",
+      "sources": [
+        "history"
+      ],
+      "isolated_cross_version_jacobian_disagreement_range": [
+        0.13,
+        0.34
+      ],
+      "pinned_fd_truncation_range": [
+        0.27,
+        0.44
+      ],
+      "evidence_level": "decision_archive_report_not_recomputed"
+    },
+    {
+      "id": "restart_metric_agreement",
+      "summary": "Code comments and early decisions claim single-stage metric identity; raw expanded benchmark has 24/31 identical dictionaries, so universal identity is unsupported. Training-only optimization remains subject to strict fresh verification.",
+      "sources": [
+        "task",
+        "history",
+        "restart_pairs"
+      ]
+    },
+    {
+      "id": "stale_repair_snapshot",
+      "summary": "Notebook last highlighted violation .1464, but latest archived repair2 state records .04070152608757205 at round694. Neither meets the .01 gate.",
+      "sources": [
+        "logbook",
+        "repair2"
+      ]
+    },
+    {
+      "id": "no_adjoint",
+      "summary": "A full VMEC adjoint was investigated, not implemented. Existing gradient computation pays finite-difference solver cost.",
+      "sources": [
+        "history",
+        "gradient_service",
+        "polish"
+      ]
+    },
+    {
+      "id": "limited_derivative_support",
+      "summary": "Finite-difference derivatives cover a selected coefficient subset; grid-shape changes cause columns to be dropped. Large-step objective branch switches limit local predictions.",
+      "sources": [
+        "polish",
+        "gradient_service"
+      ]
+    }
+  ]
+}
