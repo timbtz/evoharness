@@ -8,11 +8,13 @@ Run with `uv run --group analysis evoharness figures`.
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
 import numpy as np
 
 from evoharness.paths import REPO_ROOT
@@ -89,6 +91,58 @@ def screening():
     fig.tight_layout(rect=(0,.065,1,1));save(fig,"screening-effects")
 
 
+def highlights():
+    """Compact README results, with each experiment's limitation kept visible."""
+    data = ROOT / "reports/data"
+    benchmark = json.loads((data / "benchmark-evidence.json").read_text())
+    stellar = json.loads((data / "stellar-evidence.json").read_text())
+    studies = {study["id"]: study for study in benchmark["studies"]}
+    packing = studies["m1_binpacking_live_run"]
+    kernel = studies["m1_matmul_c_live_run"]
+    routing = studies["cvrp_memory_vs_score_only_seed3"]
+    arms = {arm["feedback"]: arm for arm in routing["arms"]}
+    polish = next(run for run in stellar["run_families"]
+                  if run["family"] == "fd_solver_gradient_polish")
+    cards = [
+        ("01 / BIN PACKING", "Training excess · lower is better",
+         f"{packing['seed_train_excess_pct']:.3f}% → {packing['best_train_excess_pct']:.3f}%",
+         f"{packing['private_excess_pct']:.3f}% on private split · {packing['calls']} model calls",
+         "One recorded trajectory", BLUE),
+        ("02 / CPU KERNEL", "Private speedup",
+         f"{kernel['private_speedup_x']:.2f}×",
+         f"{kernel['calls']} model calls · same-binary timing",
+         "Naive baseline, not optimized BLAS", TEAL),
+        ("03 / VEHICLE ROUTING", "Private gap · score-only versus memory",
+         f"{arms['score_only']['private_gap_pct']:.3f}% → {arms['memory']['private_gap_pct']:.3f}%",
+         "One seed · shared ancestry and memory",
+         "Timing noise; memory effect not isolated", PLUM),
+        ("04 / VMEC++ POLISH", "Official P2 gain",
+         f"+{polish['official_gain']:.6f}",
+         f"{polish['steps']} steps · {polish['solves']} solver calls",
+         "Inherited design · local gain, then stall", AMBER),
+    ]
+    fig, ax = plt.subplots(figsize=(14, 7.3))
+    ax.set(xlim=(0, 14), ylim=(0, 7.3))
+    ax.axis("off")
+    ax.text(.2, 6.92, "Selected measured outcomes", fontsize=24, weight="bold")
+    ax.text(.2, 6.50, "Four experiments. Four separate comparisons.",
+            fontsize=12, color=MUTED)
+    for i, (label, metric, value, detail, caveat, color) in enumerate(cards):
+        x, y = .2 + (i % 2) * 7, 3.45 - (i // 2) * 2.85
+        ax.add_patch(FancyBboxPatch((x, y), 6.6, 2.55,
+                     boxstyle="round,pad=0.02,rounding_size=0.12",
+                     facecolor="#f8fafc", edgecolor="#dce4ee", linewidth=1))
+        ax.plot([x + .24, x + 6.34], [y + 2.32, y + 2.32], color=color, lw=2.5)
+        ax.text(x + .25, y + 2.03, label, fontsize=10, color=color, weight="bold")
+        ax.text(x + .25, y + 1.66, metric, fontsize=11, color=MUTED)
+        ax.text(x + .25, y + .96, value, fontsize=28, weight="bold", color=INK)
+        ax.text(x + .25, y + .55, detail, fontsize=11, color=INK)
+        ax.text(x + .25, y + .22, caveat, fontsize=10, color=MUTED)
+    ax.text(.2, .13, "Different tasks, budgets and units · Evidence review: "
+            + stellar["snapshot_date"], fontsize=10, color=MUTED)
+    save(fig, "research-highlights")
+
+
 def trajectory():
     phases=[("01 / JUL 18","Five-axis workbench","Small tasks\nMeasured splits",BLUE),
             ("02 / JUL 22–27","Memory + campaigns","Predictions and analyst\nBranch / merge",BLUE),
@@ -124,6 +178,6 @@ if __name__ == "__main__":
     from evoharness.analysis.design_figures import generate as design_figures
 
     argparse.ArgumentParser(description=__doc__).parse_args()
-    setup(); local_fonts(); hero(); screening(); trajectory()
+    setup(); local_fonts(); hero(); screening(); highlights(); trajectory()
     design_figures()
     print(f"Figures written to {OUT.relative_to(ROOT)}")
