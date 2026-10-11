@@ -69,26 +69,26 @@ The strongest lesson was that **better experimental controls mattered as much as
 
 I extended the **evaluation interface and research loop around [ConStellaration](https://github.com/proximafusion/constellaration) and [VMEC++](https://github.com/proximafusion/vmecpp)**. The LLM writes an optimizer; that program spends a limited solver budget searching boundary parameters. A returned boundary can then be re-evaluated without candidate code.
 
-![Nested stellarator optimization: an LLM writes an optimizer, the optimizer exchanges boundaries and metrics with VMEC++ inside a limited-budget sandbox, and the returned boundary goes to clean re-evaluation. Search feedback returns to the LLM.](reports/figures/vmec-loop-v2.png)
+![What I added around VMEC++: exact boundary tools, richer constraint and failure feedback, hybrid finite-difference/JAX gradients, and small local steps with joint constraint repair. Fresh evaluation determines acceptance.](reports/figures/vmec-extensions-v3.png)
 
 ### What I added—and what happened
 
 | Change | Why it mattered | Observed outcome |
 |---|---|---|
-| **Constraint-level feedback** | Official zero scores hide progress before feasibility | Exposed individual violations and the limiting constraint |
-| **Metered calls and graded failures** | Solver time is part of the search budget | Bounded inner search; some failed solves retained useful diagnostics |
+| **Constraint and failure feedback** | Official zero scores and failed solves hide useful information | Exposed individual violations, the limiting constraint, and available force residuals |
+| **Geometry tools and hybrid gradients** | Give the optimizer local directions | Exact aspect tools; solver-output finite differences combined with JAX metric derivatives. Polish gained **0.001956 official P2 / 715 solves** |
+| **Joint constraint repair** | Improving QI alone could worsen mirror; elongation also blocked repair | Added mirror and approximate elongation gradients, then joint descent. One run reduced violation **0.5585 → 0.4656**, still infeasible |
 | **Margin and provenance checks** | Higher scores can spend tolerance or reproduce public seeds | Exposed strong inherited results that were almost collinear with their ancestors |
-| **Geometry tools and pinned-solver gradients** | Give the optimizer useful local directions | Finite-difference polish gained **0.001956 official P2** over **715 solves**, then stalled |
 | **Clean re-evaluation and fidelity promotion** | Cheap screening can reward numerical artifacts | Two **≈ +0.0136** screening gains became **official losses** |
 | **Feedback-first prompts and persistent repair** | Long plans had displaced actual measurements | Put recent outcomes, failures, incumbent code, and predictions back into context |
 
-The authoritative environment pins **ConStellaration 0.2.6 / VMEC++ 0.4.11**. Final re-evaluation uses that same solver stack; it is not independent physical replication. [Implementation and detailed findings](reports/research-notes.md#6-extending-the-constellarationvmec-evaluator)
+The authoritative stack is **ConStellaration 0.2.6 / VMEC++ 0.4.11**. The gradient service reserves **41 evaluations** at its default size; it is an approximate local tool, not a VMEC adjoint. Final verification uses the same pinned stack. [How the extensions work, why they changed, and what the runs show →](reports/vmec-extensions.md)
 
-### Where the latest repair run stopped
+### Where the later LLM repair run stopped
 
 > **Worst violation: 0.04070 · required limit: 0.01 · P2: 0**
 >
-> The imported-seed repair arm reached 569 evaluated proposals. Mirror remained limiting, and objective `L` fell to 3.5815. This frontier is still infeasible and has not been officially re-scored.
+> A separate imported-seed repair campaign reached 569 evaluated proposals. Mirror remained limiting, and objective `L` fell to 3.5815. This frontier is still infeasible and has not been officially re-scored.
 
 Repair, public-seed refinement, and unaided construction answer different questions. The project has demonstrated verified local improvements; **it has not established an independently discovered, officially feasible new stellarator family**.
 

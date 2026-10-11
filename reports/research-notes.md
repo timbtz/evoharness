@@ -276,6 +276,8 @@ The main progression was toward stronger experimental controls. Added complexity
 
 ## 6. Extending the ConStellaration/VMEC++ evaluator
 
+> **Updated technical audit (2026-10-11):** [Gradient tools, extended feedback, joint repair, and measured outcomes](vmec-extensions.md). That focused note distinguishes historical runs from current code and records limitations found by checking the raw artifacts.
+
 ### The scientific task and the two optimization loops
 
 For the stellarator experiments I used [ConStellaration P2](https://github.com/proximafusion/constellaration), backed by [VMEC++](https://github.com/proximafusion/vmecpp). I extended the **evaluation interface, feedback, tools, and workflows around the solver**. The pinned authoritative environment uses `constellaration==0.2.6` and `vmecpp==0.4.11`. [Evaluator image](../src/evoharness/tasks/stellar_p2/Dockerfile.eval)
@@ -303,7 +305,7 @@ This creates two budgets: model proposals and the solver work inside each propos
 | **Feasibility-aware feedback** | Official zero scores hide progress among infeasible designs | Negative worst normalized violation during search, objective `L`, raw metrics, individual constraints, errors, and the active constraint |
 | **Clean artifact verification** | Candidate code must not award itself the final score | Re-score only the returned boundary in a fresh evaluator container, without the candidate program |
 | **Margin and novelty diagnostics** | Gains may come from spending tolerance or reproducing a known design | Margin penalty, scale/gauge-normalized bank distance, cosine similarity, provenance/export checks |
-| **Cheaper nearby evaluations** | Solver latency restricts experimentation | A single-stage path omitting a redundant coarse stage in tested cases; true hot restart was rejected as default because it changed equilibria |
+| **Cheaper nearby evaluations** | Solver latency restricts experimentation | Single-stage training solves were identical in 24/31 paired cases, with median speedup 1.34×; both single-stage and true restart could change results, requiring strict fresh verification |
 | **Graded solver failures** | Some nonconverged solves contain useful information | Residual-based soft-failure feedback during search, ranked below converged evaluations |
 | **Geometry and metric gradients** | Random perturbations ignore available local structure | Exact aspect tools, differentiable metric diagnostics, finite differences through the pinned solver |
 | **Fidelity promotion** | Coarse discretizations can reward artifacts | Structural candidates screened at very low fidelity (VLF), promoted to low fidelity (LF), then checked officially |
@@ -316,7 +318,7 @@ Implementation: [task/evaluator interface](../src/evoharness/tasks/stellar_p2/ta
 
 At official fidelity, P2 is `L / 20` only when **all five normalized constraint violations are at most 0.01**; otherwise it is zero. The constraints cover aspect ratio, elongation, rotational transform, mirror ratio, and quasi-isodynamicity (QI).
 
-During search, I exposed the negative worst violation for infeasible candidates. This provides a direction of progress before feasibility. Later experiments also tracked the following margin-adjusted selection diagnostic, called `honest_score` in the code:
+During search, I exposed the negative worst violation for infeasible candidates. This provides a direction of progress before feasibility. For scored feasible candidates, later experiments also tracked the following margin-adjusted selection diagnostic, called `honest_score` in the code:
 
 ```text
 honest_score = p2_score - 0.92 × max(0, worst_violation - 0.002)
@@ -341,16 +343,18 @@ The raw record is valid under its pinned evaluator, but near-collinearity with a
 
 I first exposed exact geometry tools for the aspect constraint. They avoid solver calls for information available directly from the boundary. The difficult constraints, however, depend on the equilibrium.
 
-I then added downstream differentiable metrics and finite differences through the pinned VMEC++ solver. This is **not a VMEC adjoint**. A default 20-coefficient central-difference gradient requires 41 solves, so the information has substantial cost.
+I then added downstream differentiable metrics and finite differences through the pinned VMEC++ solver. This is **not a VMEC adjoint**. The default service reserves 41 evaluation units for up to 20 eligible coefficients; a complete stencil uses `2m+1` solves for `m` selected coefficients. A trial step requires a fresh evaluation as well.
 
 | Experiment | Outcome | Lesson |
 |---|---|---|
 | **Aspect-only gradient A/B** | Two paired margin-adjusted deltas had opposite signs: **−0.00199 / +0.00288**; three of five arms kept their seed | No consistent benefit established; the tool addressed only one constraint |
 | **Pinned-solver finite-difference polish** | **17 steps / 715 solves**; official **0.632082 → 0.634038**; violation **0.004728 → 0.004361** | A small local improvement transferred to official evaluation |
-| **Full-gradient access for an LLM writer** | **18 of 49** candidates called `metric_grad`; the run retained its starting boundary | Tool availability and adoption do not establish better search |
-| **Different-solver gradient proposals** | VMEC++ 0.7.1 sidecar derivatives did not reliably descend the pinned 0.4.11 objective | Proposal tools may differ; the fixed evaluator decides which gains count |
+| **Full-gradient access for an LLM writer** | Fresh AST audit: **30/136** candidate programs across three runs contain gradient-tool calls; none of their final winners do | Source-call presence does not establish runtime use or a benefit to the selected winner; the earlier 18/49 count used a different historical denominator |
+| **Different-solver gradient proposals** | The first VMEC++ 0.7.1 versus 0.4.11 test changed both solver and downstream functional; a later decomposition narrowed the diagnosis | Foreign Jacobians were not categorically ruled out; the pinned evaluator remains the scoring authority |
 
-Local step size mattered: predictions were useful around coefficient changes of `1e-5`; changes near `1e-4` could switch the active grid minimum. Smoothing to support larger steps introduced bias comparable to the desired gain.
+Local step size mattered: one QI-descent probe had prediction ratios of **0.99 at `3e-5`** and **−0.05 at `1e-4`**. This is not a universal accuracy guarantee for L or other boundaries. Changes near `1e-4` could switch the active grid minimum; smoothing to support larger steps introduced bias comparable to the desired gain.
+
+Later work added mirror gradients from the same perturbation solves, approximate elongation gradients with a frozen magnetic axis, and joint feasibility descent. QI-only and mirror-only steps had alternated the bottleneck. Joint repair reduced worst violation **0.558492 → 0.465618** in 4,215 solves; a Goodman repair reduced **0.208670 → 0.150911** in 1,259 solves. Both remained infeasible. These runs are separate from the later **0.04070** LLM repair frontier. The [focused audit](vmec-extensions.md) covers acceptance/projection corrections, missing constraint derivatives, and unresolved normalization concerns.
 
 The successful polish eventually stalled. Records disagree on the decisive explanation—constraint projection versus a search-margin penalty—and later evidence challenged the margin explanation. The supported finding is a modest, verified local gain followed by a stall. [Finite differences](../src/evoharness/tasks/stellar_p2/physics/finite_difference.py) · [Metric tools](../src/evoharness/tasks/stellar_p2/physics/metrics/)
 

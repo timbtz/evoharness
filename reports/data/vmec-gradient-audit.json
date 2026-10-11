@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "audit_date_utc": "2026-10-11",
+  "source_revision": "a855ae57b45796d57dc57ad84daee263f90c2196",
+  "scope": "Read-only audit of current gradient code and persisted local run artifacts; no solver runs, metric recalculation, or code fixes. Raw .local files are gitignored and may be unavailable in a fresh clone.",
+  "historical_local_polish": {
+    "source": ".local/runs/qi_polish/state.json",
+    "attempted_steps": 17,
+    "recorded_accepted_steps": 11,
+    "recorded_solves": 715,
+    "final_trust": 4.11522633744856e-08,
+    "initial_honest_score": 0.6199628453762763,
+    "best_accepted_honest_score": 0.6227586623086854,
+    "initial_worst_normalized_violation": 0.002077201324472888,
+    "best_accepted_worst_normalized_violation": 0.002077201324472888,
+    "best_violation_step": 0,
+    "accounting": "1 initial solve + 17 * (1 base + 40 perturbation + 1 verification) = 715",
+    "transfer_source": ".local/runs/qi_polish/transfer.json",
+    "official_transfer": {
+      "initial_score": 0.6320817392890348,
+      "polished_score": 0.6340376301825748,
+      "score_delta": 0.00195589089353998,
+      "initial_worst_normalized_violation": 0.004728181290977185,
+      "polished_worst_normalized_violation": 0.004361213449813106,
+      "vlf_honest_score_delta": 0.0027958169324090454
+    },
+    "historical_acceptance_regression": {
+      "accepted_step": 8,
+      "previous_incumbent_step": 6,
+      "previous_incumbent_honest_score": 0.6225263236485736,
+      "accepted_honest_score": 0.6223879124648596,
+      "interpretation": "The recorded accepted count includes this regression. Current polish.py compares against the accepted incumbent instead of the most recent rejected row."
+    },
+    "interpretation": "A measured local improvement transferred to official fidelity; the loop later stalled. This does not demonstrate structural novelty or establish the cause of stalling.",
+    "recorded_active_constraint_labels": [
+      "aspect",
+      "qi"
+    ]
+  },
+  "gradient_tool_adoption": {
+    "method": "Parse each candidate row's code with Python ast. Count direct attribute-call syntax named metric_grad or grad_step. Count all candidate rows, including initialization and repair rows; exclude prose-only mentions. A syntactic call may be unreachable, budget-gated or fail. These counts do not establish runtime invocation or successful gradient evaluation.",
+    "historical_comparison_caveat": "Earlier 18/49 summaries used a different historical counting method/scope; do not compare them directly with this all-row AST audit.",
+    "runs": [
+      {
+        "run": "g1",
+        "ledger_source": ".local/runs/gradrun/g1/ledger.jsonl",
+        "candidate_rows": 51,
+        "ast_parsed_candidate_rows": 48,
+        "ast_parse_failures": 3,
+        "candidate_rows_with_metric_grad_call_syntax": 15,
+        "candidate_rows_with_grad_step_call_syntax": 15,
+        "candidate_rows_with_both_call_syntax": 15,
+        "accepted_rows_with_call_syntax": [
+          {
+            "id": "c0006r1",
+            "scores": {
+              "train": 0.5830060389314674,
+              "val": 0.5948815920537834
+            }
+          },
+          {
+            "id": "c0007",
+            "scores": {
+              "train": 0.5830060389314674,
+              "val": 0.5948815920537834
+            }
+          }
+        ],
+        "final_winner": {
+          "source": ".local/runs/gradrun/g1/best.py",
+          "id": "c0000",
+          "gradient_call_syntax": [],
+          "train": 0.5830060389314674,
+          "validation": 0.5948815920537834,
+          "official_private_score": 0.6408203599273377,
+          "official_private_metrics": {
+            "feasibility": 0.00786559996221552,
+            "bank_dist": 0.001023,
+            "bank_cos": 0.999999,
+            "honest_score": 0.635424,
+            "tolerance_used": 0.7866
+          }
+        }
+      },
+      {
+        "run": "g2",
+        "ledger_source": ".local/runs/gradrun/g2/ledger.jsonl",
+        "candidate_rows": 57,
+        "ast_parsed_candidate_rows": 52,
+        "ast_parse_failures": 5,
+        "candidate_rows_with_metric_grad_call_syntax": 12,
+        "candidate_rows_with_grad_step_call_syntax": 12,
+        "candidate_rows_with_both_call_syntax": 12,
+        "accepted_rows_with_call_syntax": [
+          {
+            "id": "c0002",
+            "scores": {
+              "train": 0.5830060389314674,
+              "val": 0.5948815920537834
+            }
+          },
+          {
+            "id": "c0033",
+            "scores": {
+              "train": 0.5843378258250835,
+              "val": 0.5963216586752363
+            }
+          }
+        ],
+        "final_winner": {
+          "source": ".local/runs/gradrun/g2/best.py",
+          "id": "c0029",
+          "gradient_call_syntax": [],
+          "train": 0.5843378258250835,
+          "validation": 0.5963216586752363,
+          "official_private_score": 0.6408556701040611,
+          "official_private_metrics": {
+            "feasibility": 0.00774946082647876,
+            "bank_dist": 0.001079,
+            "bank_cos": 0.999999,
+            "honest_score": 0.635566,
+            "tolerance_used": 0.7749
+          }
+        }
+      },
+      {
+        "run": "g3",
+        "ledger_source": ".local/runs/gradrun/g3/ledger.jsonl",
+        "candidate_rows": 28,
+        "ast_parsed_candidate_rows": 28,
+        "ast_parse_failures": 0,
+        "candidate_rows_with_metric_grad_call_syntax": 3,
+        "candidate_rows_with_grad_step_call_syntax": 3,
+        "candidate_rows_with_both_call_syntax": 3,
+        "accepted_rows_with_call_syntax": [],
+        "final_winner": {
+          "source": ".local/runs/gradrun/g3/best.py",
+          "id": "c0000",
+          "gradient_call_syntax": [],
+          "train": 0.5843378258250835,
+          "validation": 0.5963216586752363,
+          "official_private_score": 0.6408556701040611,
+          "official_private_metrics": {
+            "feasibility": 0.00774946082647876,
+            "bank_dist": 0.001079,
+            "bank_cos": 0.999999,
+            "honest_score": 0.635566,
+            "tolerance_used": 0.7749
+          }
+        }
+      }
+    ],
+    "total_candidate_rows": 136,
+    "total_rows_with_both_call_syntax": 30,
+    "finding": "All four accepted candidate rows containing solver-gradient calls tie an already attained score. No final best.py contains either direct call. The small final official score difference across runs cannot be attributed to a gradient operator from these records."
+  },
+  "constraint_repair_trajectories": [
+    {
+      "source": ".local/runs/qidesc-platform/state.json",
+      "attempted_steps": 43,
+      "recorded_accepted_steps": 31,
+      "recorded_solves": 4215,
+      "final_trust": 5.4931640625000005e-08,
+      "initial_honest_score": 0.17172451143821799,
+      "best_accepted_honest_score": 0.24229370400665806,
+      "initial_worst_normalized_violation": 0.5584922900399713,
+      "best_accepted_worst_normalized_violation": 0.46561842822689536,
+      "best_violation_step": 42,
+      "run": "qidesc-platform",
+      "official_feasibility_threshold": 0.01,
+      "remains_infeasible_at_recorded_search_fidelity": true,
+      "evidence_scope": "Persisted local search trajectory; not a new official-fidelity evaluation.",
+      "recorded_active_constraint_labels": [
+        "descend-qi",
+        "hold-aspect",
+        "descend-mirror",
+        "jd-qi",
+        "jd-mirror"
+      ],
+      "recorded_constraint_cosine_range": [
+        -0.807,
+        -0.559
+      ]
+    },
+    {
+      "source": ".local/runs/goodman-repair/state.json",
+      "attempted_steps": 21,
+      "recorded_accepted_steps": 13,
+      "recorded_solves": 1259,
+      "final_trust": 7.8125e-08,
+      "initial_honest_score": 0.11447220946747522,
+      "best_accepted_honest_score": 0.16773660092962286,
+      "initial_worst_normalized_violation": 0.2086703552118024,
+      "best_accepted_worst_normalized_violation": 0.15091060784642157,
+      "best_violation_step": 20,
+      "run": "goodman-repair",
+      "official_feasibility_threshold": 0.01,
+      "remains_infeasible_at_recorded_search_fidelity": true,
+      "evidence_scope": "Persisted local search trajectory; not a new official-fidelity evaluation.",
+      "recorded_active_constraint_labels": [
+        "jd-mirror",
+        "jd-elongation",
+        "hold-aspect",
+        "jd-qi"
+      ],
+      "recorded_constraint_cosine_range": [
+        0.017,
+        0.08
+      ]
+    },
+    {
+      "source": ".local/runs/goodman2-repair/state.json",
+      "attempted_steps": 6,
+      "recorded_accepted_steps": 0,
+      "recorded_solves": 397,
+      "final_trust": 4.11522633744856e-08,
+      "initial_honest_score": 0.1950977431647086,
+      "best_accepted_honest_score": 0.1950977431647086,
+      "initial_worst_normalized_violation": 0.14640111492292607,
+      "best_accepted_worst_normalized_violation": 0.14640111492292607,
+      "best_violation_step": 0,
+      "run": "goodman2-repair",
+      "official_feasibility_threshold": 0.01,
+      "remains_infeasible_at_recorded_search_fidelity": true,
+      "evidence_scope": "Persisted local search trajectory; not a new official-fidelity evaluation.",
+      "recorded_active_constraint_labels": [
+        "jd-aspect",
+        "jd-qi",
+        "jd-mirror",
+        "jd-elongation"
+      ]
+    },
+    {
+      "source": ".local/runs/qidesc-nfp6/state.json",
+      "attempted_steps": 21,
+      "recorded_accepted_steps": 13,
+      "recorded_solves": 1051,
+      "final_trust": 3.4293552812071324e-08,
+      "initial_honest_score": 0.08471811701033394,
+      "best_accepted_honest_score": 0.1242066558447768,
+      "initial_worst_normalized_violation": 0.5748434538666818,
+      "best_accepted_worst_normalized_violation": 0.5305490298198079,
+      "best_violation_step": 20,
+      "run": "qidesc-nfp6",
+      "official_feasibility_threshold": 0.01,
+      "remains_infeasible_at_recorded_search_fidelity": true,
+      "evidence_scope": "Persisted local search trajectory; not a new official-fidelity evaluation.",
+      "recorded_active_constraint_labels": [
+        "descend-qi"
+      ]
+    },
+    {
+      "source": ".local/runs/qidesc3-repairbest/state.json",
+      "attempted_steps": 5,
+      "recorded_accepted_steps": 4,
+      "recorded_solves": 491,
+      "final_trust": 2.25e-05,
+      "initial_honest_score": 0.46524029117698357,
+      "best_accepted_honest_score": 0.4659498692679858,
+      "initial_worst_normalized_violation": 0.41152004946363246,
+      "best_accepted_worst_normalized_violation": 0.4105487374749298,
+      "best_violation_step": 5,
+      "run": "qidesc3-repairbest",
+      "official_feasibility_threshold": 0.01,
+      "remains_infeasible_at_recorded_search_fidelity": true,
+      "evidence_scope": "Persisted local search trajectory; not a new official-fidelity evaluation.",
+      "recorded_active_constraint_labels": [
+        "jd-aspect",
+        "jd-qi"
+      ],
+      "recorded_constraint_cosine_range": [
+        -0.002,
+        0.006
+      ]
+    }
+  ],
+  "constraint_repair_evolution": {
+    "source": ".local/runs/qidesc-platform/polish.log",
+    "observations": [
+      "Steps 1-9 record QI descent; steps 10-11 record mirror descent.",
+      "Steps 12-16 record joint QI/mirror descent; steps 17 onward also record gradient-angle cosines.",
+      "Recorded QI/mirror cosines range to approximately -0.807, consistent with competing local directions."
+    ],
+    "code_inspection": "Current feasibility mode builds an equal-descent Gram-system direction from near-tied aspect, QI, mirror and axis-frozen elongation gradients; it accepts only a sufficiently smaller worst violation and shrinks rejected steps.",
+    "limit": "These gradient repair lanes remain infeasible and are distinct from the later database-repair lane with a recorded worst violation near 0.04070."
+  },
+  "relaxed_margin_ceiling": {
+    "source": ".local/runs/polish-ceiling-champion/state.json",
+    "attempted_steps": 29,
+    "recorded_accepted_steps": 23,
+    "recorded_solves": 1219,
+    "final_trust": 4.11522633744856e-08,
+    "initial_honest_score": 0.6200338705947914,
+    "best_accepted_honest_score": 0.6221200138347556,
+    "initial_worst_normalized_violation": 0.002077201324472888,
+    "best_accepted_worst_normalized_violation": 0.0018209809602275583,
+    "best_violation_step": 5,
+    "margin_target": 0.009,
+    "margin_target_source": ".local/runs/polish-ceiling-champion/polish.log",
+    "official_verification_source": ".local/runs/polish-ceiling-champion/official_verify.json",
+    "official_verification": {
+      "bank_dist": 0.002527797424030211,
+      "bank_cos": 0.99999,
+      "score": 0.6344214977591365,
+      "metrics": {
+        "p2_score": 0.6344214977591365,
+        "feasibility": 0.0019244442039305198,
+        "objective_L": 12.68842995518273,
+        "official": true
+      }
+    },
+    "interpretation": "Trust also collapsed with the relaxed search margin. This weakens a single-cause explanation based on the earlier 0.002 shaping target; the underlying cause remains unresolved.",
+    "recorded_active_constraint_labels": []
+  },
+  "measured_local_step_probe": {
+    "source": ".local/runs/fd_probe/champion/small_caps.json",
+    "metric": "Delta log10(QI), not L-gradB ascent accuracy",
+    "steps": [
+      {
+        "max_coefficient_step": 3e-05,
+        "predicted_delta_log10_qi": -0.014203572186636471,
+        "actual_delta_log10_qi": -0.014070579793253657,
+        "actual_over_predicted": 0.9906366939502768
+      },
+      {
+        "max_coefficient_step": 0.0001,
+        "predicted_delta_log10_qi": -0.047345240622121566,
+        "actual_delta_log10_qi": 0.002194870749039346,
+        "actual_over_predicted": -0.046358846637983196
+      }
+    ],
+    "limit": "A local QI probe motivates conservative steps; the ratios are not a universal guarantee for other boundaries, objectives or scales."
+  },
+  "current_code_inspection": {
+    "architecture": "JAX derivatives of downstream metrics contracted with central finite differences of solver outputs. This is a hybrid local derivative estimate, not a VMEC++ adjoint or end-to-end differentiation of the equilibrium solver.",
+    "cost": "metric_grad reserves 2*k+1 evaluations upfront: 41 at k=20. The service actually solves 2*m+1 times for m eligible already-nonzero coefficients, where m <= k. Proposal verification adds a fresh solve.",
+    "current_direction": "Honest-score mode differentiates L/20 minus the weighted worst-violation penalty when aspect or QI binds; its fallback jointly projects against supported active constraints. task.grad_step can additionally add a nearest-bank-distance subgradient. This is newer than the original sequential-projection polish trajectory.",
+    "runtime_isolation": "The gradient service runs in a child process so the evaluation-pool parent does not initialize JAX/XLA before forking.",
+    "concerns_not_numerically_validated_in_this_audit": [
+      {
+        "name": "Fixed minor-radius normalization",
+        "evidence": "polish.py:90-101 differentiates six WOUT arrays while holding Aminor_p fixed; lgradb_jax.py:168 divides the metric by Aminor_p.",
+        "implication": "The implemented L derivative omits the boundary response of this normalization. Do not label it a complete exact boundary derivative."
+      },
+      {
+        "name": "Aspect scaling in feasibility repair",
+        "evidence": "finite_difference.py:175-177 already divides aspect gradients by ASPECT_BOUND=10; polish.py:240 divides ga by 10 again.",
+        "implication": "This appears to rescale aspect twice relative to the intended violation derivative. It requires a numerical check; it is not an established explanation for failed runs."
+      }
+    ],
+    "documented_approximations_and_api_limits": [
+      {
+        "name": "Frozen magnetic axis",
+        "evidence": "boundary_grad.py:98-118 and polish.py:126-143",
+        "implication": "Elongation gradients hold the base equilibrium's axis fixed and omit its boundary response; treat them as advisory local directions."
+      },
+      {
+        "name": "Mirror gradient is optional",
+        "evidence": "boundary_grad.py:78-89 returns grad_mirror when requested; task.py:700-702 defaults to L, qi, aspect, elongation.",
+        "implication": "The available mirror extension does not mean default metric_grad calls expose it, or that grad_step uses it in its composite objective."
+      },
+      {
+        "name": "Trust and acceptance",
+        "evidence": "polish.py:320-347 and task.py:724-752",
+        "implication": "A step is a proposal requiring evaluation. Current incumbent-based acceptance fixes a regression visible in historical qi_polish step 8."
+      }
+    ]
+  },
+  "source_artifacts": {
+    ".local/runs/fd_probe/champion/small_caps.json": {
+      "sha256": "69c4dc80b78ac095df5f60dded9e7ddb327c06d680c84020d1b6c0b283e6b90c"
+    },
+    ".local/runs/goodman-repair/state.json": {
+      "sha256": "e435d73e4083c6bc090c6b8ba3cd7e4d3a145b857bfdd6aff056f5ef661b9569"
+    },
+    ".local/runs/goodman2-repair/state.json": {
+      "sha256": "e2f504030ebe8a3811b9657addeb85f415c4a7d5d131b1998a3e0239b6ec8f16"
+    },
+    ".local/runs/gradrun/g1/best.py": {
+      "sha256": "e76c01304c000dfb9598f78e4918514765816b7dfe2528186173e022a19d15fd"
+    },
+    ".local/runs/gradrun/g1/ledger.jsonl": {
+      "sha256": "54118a78a179f9f75da9b1bd3cf93966d199415309a4f753a1b0108df3964623"
+    },
+    ".local/runs/gradrun/g2/best.py": {
+      "sha256": "9ab5d04581bbb5466beb495af6b9577fdf98d8654a2e14403ce99ad3b845c533"
+    },
+    ".local/runs/gradrun/g2/ledger.jsonl": {
+      "sha256": "79c41ecd4035898515689835cb05632f99f9b9be1932a7575f65ce07d813f7f5"
+    },
+    ".local/runs/gradrun/g3/best.py": {
+      "sha256": "9ab5d04581bbb5466beb495af6b9577fdf98d8654a2e14403ce99ad3b845c533"
+    },
+    ".local/runs/gradrun/g3/ledger.jsonl": {
+      "sha256": "89be38952231fab6d9e0193999bdaacd157355ed474363c987b7764e2f3a737a"
+    },
+    ".local/runs/polish-ceiling-champion/official_verify.json": {
+      "sha256": "c613311046ff023737b126ca825de81b9ea261b0bfc3fd7502769a3db0036902"
+    },
+    ".local/runs/polish-ceiling-champion/polish.log": {
+      "sha256": "c171c20d2b0b181254a4420135425e8690dd927929a9fb77140ca543e41acdc8"
+    },
+    ".local/runs/polish-ceiling-champion/state.json": {
+      "sha256": "4280124b91f44bab3eb01602edfb69bc90db33e74a796ee846fb767f51efa55a"
+    },
+    ".local/runs/qi_polish/state.json": {
+      "sha256": "16a2c4613c9559860817a5d4e8dcfc82ad1d6076387980bb10186493b7e08db1"
+    },
+    ".local/runs/qi_polish/transfer.json": {
+      "sha256": "ecb96c20b74528b336e37152aece8340e67405b9466a926f3527f4dc5b32e6cc"
+    },
+    ".local/runs/qidesc-nfp6/state.json": {
+      "sha256": "a240b8a0d969d25e824701d8df41ec40587504d0867f345ad877709068594649"
+    },
+    ".local/runs/qidesc-platform/polish.log": {
+      "sha256": "1010b554b620af2be11e4e021f5cef73d526f447cebc961e3beb543436bb031a"
+    },
+    ".local/runs/qidesc-platform/state.json": {
+      "sha256": "903be9743a7bf48d75571da3d9459a0969ff8024235445bb9ed379f0534b76ca"
+    },
+    ".local/runs/qidesc3-repairbest/state.json": {
+      "sha256": "e646351c6cf4aa71feee677bc9f33ca293d2937fa7780e58dff31e28f5fefa84"
+    },
+    "src/evoharness/tasks/stellar_p2/physics/finite_difference.py": {
+      "sha256": "ac312010af15af51bbe88d4a19d38bdc6ec8508f090fa7ee44446edcd8ec8ae7"
+    },
+    "src/evoharness/tasks/stellar_p2/physics/metrics/boundary_grad.py": {
+      "sha256": "d7fee894a60b4d139e8dc935050ac1eae12c36027c0e4b7f5e36de2fbfe80abf"
+    },
+    "src/evoharness/tasks/stellar_p2/physics/metrics/lgradb_jax.py": {
+      "sha256": "0e041130126082c070520c1ebc3a14e6b171cc3baedd2728774a648ae3b0db46"
+    },
+    "src/evoharness/tasks/stellar_p2/physics/metrics/qi_jax.py": {
+      "sha256": "bda328cc8181a438e3445e63e07dcaa576e41365829363dd18de7f595630e567"
+    },
+    "src/evoharness/tasks/stellar_p2/physics/polish.py": {
+      "sha256": "50f9183698f0c1e7b535251894665ffb04ed9269a4f73f5ced7baaafea2766f5"
+    },
+    "src/evoharness/tasks/stellar_p2/task.py": {
+      "sha256": "f53d3dc5a03c32fc6694ddac8a92e6a6cf488bf7f3346cbf5b04843afcb2247b"
+    }
+  }
+}
