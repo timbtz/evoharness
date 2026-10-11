@@ -2,44 +2,447 @@
 
 ![EvoHarness — executable discovery and stellarator research](reports/figures/hero.svg)
 
-[Architecture](#architecture) · [Stellarators](#stellarator-evidence-in-depth) · [Benchmarks](#evidence-from-the-algorithmic-tasks) · [Run an experiment](#install-and-inspect) · [Evidence explorer](reports/index.html)
+**Research into how language models, search, memory, and evaluators can work together to discover better executable solutions.**
 
-**A research workbench for agents that create executable solutions, learn from evaluator feedback, and search for useful novelty.**
+[Motivation](#1-research-motivation) · [The optimizer loop](#2-how-the-optimizer-works) · [Architecture experiments](#4-architecture-designs-i-explored) · [Results](#5-results-and-research-trajectory) · [VMEC++ extensions](#6-extending-the-constellarationvmec-evaluator) · [Run the project](#8-running-and-inspecting-the-project) · [Future work](#9-continuing-the-research)
 
-EvoHarness studies the optimizer around a model: representation, feedback, memory, selection, search, model roles, execution isolation, fidelity, and verification. An agent proposes an artifact, a task-owned evaluator measures it, and the harness records enough evidence to decide what to try next. Six task contracts range from small algorithmic benchmarks to constrained stellarator design.
+## 1. Research motivation
 
-This is active research. The objective is technically substantive, independently verified new solutions. The record includes successful local optimization, negative results, fidelity artifacts, inherited refinements, and approaches that remain unproven. In this README, **implemented** describes code, **observed** describes a recorded run, **supported** requires an appropriate comparison, and **open** marks a hypothesis. A stronger score alone establishes neither independence nor scientific novelty.
+I started this project to understand **which parts of an LLM-driven optimizer actually make it better at finding new solutions**. Systems such as AlphaEvolve, FunSearch, OpenEvolve, and KernelEvolve suggest a powerful approach: let a model propose executable ideas, test those ideas, and use the results to guide the next proposal. My interest was in the architecture around the model: what it sees, what it remembers, how it explores, and how it knows whether an apparent improvement is real.
 
-![EvoHarness architecture: configurable evolution, persistent physics workflows, and research orchestration feed executable artifacts into budgeted evaluation and verification.](reports/figures/architecture.png)
+I built EvoHarness as a workbench for comparing those choices. I began with small, CPU-evaluable problems so I could run repeated experiments on limited hardware, then extended the work to constrained stellarator design using ConStellaration and VMEC++. The project grew from a configurable optimization loop into experiments with persistent memory, specialist agents, branching search, physics feedback, and clean re-evaluation of returned artifacts.
 
-*Outer loop: models propose programs using retained evidence. Inner loop: the candidate optimizer queries VMEC++ under solver and execution budgets. Training feedback can drive selection immediately; clean validation re-scores the returned boundary without candidate code. Optional research orchestration and structural fidelity promotion are separate controls.*
+Earlier, in [EvoRetrieve](https://github.com/timbtz/RL-on-codefunction-in-a-GraphRAG), I explored related ideas by evolving retrieval code against [STaRK-PRIME](https://github.com/snap-stanford/stark), a benchmark combining text and graph retrieval. Those experiments included a DAG executor that chained and merged search branches. EvoHarness turns that architectural interest into explicit comparisons across multiple tasks. Retrieval is part of the research background, rather than a seventh task in this package.
 
-The system illustration uses the compact control-loop grammar of [AlphaEvolve, Figures 1–2](https://arxiv.org/pdf/2506.13131) and the separation of generation from evaluation in [KernelBench, Figure 1](https://arxiv.org/pdf/2502.10517). It depicts EvoHarness's implementation, not either reference system. AI-generated illustrations are conceptual; the plots and numeric tables below come from recorded evidence. [Prompts and visual provenance](reports/data/visual-provenance.json) are retained.
+Three questions connect the work:
 
-The [offline evidence explorer](reports/index.html) is the fastest way to inspect the reviewed run inventory. It is generated from local ledgers and opens in a browser without an application server. Raw candidate conversations, run state, downloaded data, external checkouts, and mutable memory stay under `.local/` and are intentionally untracked.
+- **Novelty:** How can the search produce a useful new method or design instead of a cosmetic rewrite or a small variation of an inherited solution?
+- **Evaluator design:** Which scores, diagnostics, failures, and gradients help the next proposal improve?
+- **Reward hacking:** How can I distinguish a real gain from overfitting, tolerance consumption, timing noise, or a numerical artifact?
 
-## Current research state
+The current contribution is a working research system, documented architecture experiments, and an evidence trail of both improvements and failures. The stellarator experiments have produced verified local refinements of inherited designs; they have **not yet established an independently discovered, officially feasible new stellarator family**.
 
-EvoHarness now has two related but distinct centers of gravity:
+<a id="optimizer-lineage"></a>
 
-1. The **configurable evolutionary optimizer** compares choices inside a reusable propose–evaluate–select loop across six tasks.
-2. The **stellarator research system** runs persistent repair, independent construction, mechanism discovery, polishing, and verification workflows around a pinned ConStellaration/VMEC++ evaluator.
+### Research and implementations that informed the project
 
-The latest persisted stellarator direction is feasibility repair of declared research seeds, including published scientific configurations. It disables the public leaderboard bank, but its imported seeds retain their ancestry. It must not be described as either public-bank refinement or unaided construction.
+These systems informed different parts of the design. EvoHarness is an experimental synthesis; I did not reproduce their full infrastructure or run a head-to-head benchmark against them. [NOTICE.md](NOTICE.md) records code adaptations separately from design references.
 
-| Evidence | Result | What it establishes |
-|---|---:|---|
-| Latest repair frontier | Worst normalized VLF violation **0.0407015**, against the **0.01** feasibility limit; `L = 3.5815`; P2 **0** | The cleanest repair landmark in the record, still infeasible and not officially verified |
-| Highest raw legacy score | Official P2 **0.6420577**, feasibility `0.0097398` | A legal public-seed refinement that used 97.4% of the tolerance and remained almost collinear with its ancestor (`bank_cos = 0.999998`) |
-| Low-margin inherited ceiling | Official P2 **0.6344215**, feasibility `0.0019244` | A more defensible view of inherited boundary quality away from the feasibility cliff |
-| Pinned-solver local polish | **+0.001956** official score over 17 steps and 715 solves | A local improvement transferred from VLF to official fidelity; no new basin was demonstrated |
-| High-order structural transforms | About **+0.0136** VLF, reversing to `-0.001663` and `-0.000706` officially | Coarse screening rewarded a solver-resolution artifact; promotion changed the conclusion |
+| Reference | Relevant architectural idea | Connection to EvoHarness |
+|---|---|---|
+| [AlphaEvolve](https://arxiv.org/html/2506.13131v1) | Model-generated programs, executable evaluation, and a retained population | The overall propose–evaluate–select pattern and evaluator-throughput question |
+| [FunSearch](https://github.com/google-deepmind/funsearch) and [EoH](https://github.com/FeiLiu36/EoH) | Program evolution, islands, population selection, and algorithmic representations | Bin-packing representation, island search, uniqueness, and parent-selection patterns |
+| [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) | An accessible implementation of evolutionary program search | Archive design reference and an attributed adaptation of the circle-packing evaluator |
+| [ReEvo](https://github.com/ai4co/reevo) | Short- and long-term reflection on evaluated algorithms | Feedback that explains differences between candidates |
+| [KernelEvolve](https://arxiv.org/html/2512.23236v4#S3.SS2) | Context-memory and deep-search sub-agents, execution diagnostics, and a filesystem knowledge base | Curated task knowledge, retained failure evidence, and bounded retrieval |
+| [ShinkaEvolve](https://github.com/SakanaAI/ShinkaEvolve) | Novelty filtering, model selection, and meta-recommendations | A design reference for search diversity and memory organization |
+| [GigaEvo](https://github.com/FusionBrainLab/gigaevo-core) / [kernel-evo](https://github.com/AXXX-Institute/kernel-evo) | Dependency-graph execution and a kernel-optimization application with evaluation feedback | Campaign orchestration, archives, and separation of execution from stored evidence |
+| [KernelBench](https://github.com/ScalingIntelligence/KernelBench) | Correctness checks and repeated runtime measurements for generated GPU kernels | An evaluation reference: speedup must be assessed after correctness on the target hardware |
 
-The persisted repair run reached round 694 after 569 evaluated proposals, 123 evaluation failures, and 12 acceptances, then exhausted a cumulative 3,000-call budget at call 3,001. Later supervision activity is not evidence of a better boundary. The seed factory reached round 2,421, with 8,569 recipe attempts and 2,650 measured; 5,520 missing-image errors in its state are historical events, not evidence that the evaluator image is currently absent. Its state still read round 2,421 on 2026-09-21. The 8,924 inventory rows added after the 2026-09-17 review were factory `llm_error` events, not new physical results. The scientific values in this README therefore describe the **2026-09-17** evidence review, with operational state and inventory rechecked on **2026-09-21**.
+Reflective memory and held-out acceptance also drew on [SkillOpt](https://microsoft.github.io/SkillOpt/). KernelBench is a benchmark; it supplies an evaluation setting for optimizer research. The C-kernel task here is a CPU experiment, not a KernelBench GPU result.
 
-## Install and inspect
+## 2. How the optimizer works
 
-EvoHarness uses Python 3.11+ and [`uv`](https://docs.astral.sh/uv/):
+The simplest version starts with an LLM proposing a candidate program. The program runs under execution limits, the evaluator checks its output, and the next model call receives the result.
+
+```mermaid
+flowchart TD
+    A["LLM proposal<br/>Candidate program"] --> B["Sandbox<br/>Run with limits"]
+    B --> C["Evaluator<br/>Check correctness<br/>Measure quality"]
+    C --> D["Feedback<br/>Score and test results"]
+    D -->|"Retained evidence<br/>guides the next proposal"| A
+```
+
+| Step | What happens |
+|---|---|
+| **Propose** | The model receives the task, a starting solution or parent, and available feedback. It proposes a replacement program or optimizer. |
+| **Execute** | Candidate code runs with time and resource limits. A failure or timeout is also an experimental result. |
+| **Evaluate** | Task-owned code measures correctness, feasibility, and quality: valid routes, matrix error, runtime, or physical constraints. |
+| **Return feedback** | The next call may receive a scalar score, per-test diagnostics, comparisons, a reflection, or retrieved memory. |
+| **Select and repeat** | A search policy decides which candidates survive and which lineage to explore next. The selected artifact is checked under the final evaluation contract. |
+
+“Learning from feedback” here means changing the next prompt, candidate, or archive. **The proposing model's weights remain fixed.** The loop can improve software used in model training: AlphaEvolve reports improvements to training infrastructure. That is a separate claim from training the proposing model itself. [AlphaEvolve applications](https://deepmind.google/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)
+
+### Why the evaluator determines what is practical
+
+Each proposal costs model inference **and** evaluation. A small routing heuristic can be tested on CPUs; a GPU kernel needs correctness and timing measurements on an appropriate GPU; a proposed training method may require a training run before its quality is known. Fast, informative evaluation allows more refinement within a fixed budget. AlphaEvolve uses staged evaluation to reject weak candidates before expensive tests. [Evaluation design](https://arxiv.org/html/2506.13131v1#S2.SS4)
+
+This led me to study the loop first on inexpensive tasks, then ask how it changes when evaluation becomes a constrained physics solve. A richer prompt cannot compensate for an evaluator that rewards the wrong behavior.
+
+<a id="tasks-and-score-contracts"></a>
+
+## 3. Tasks, models, and compute constraints
+
+### From fast checks to scientific evaluation
+
+I chose tasks with different representations and failure modes while keeping evaluation possible on the available CPU server. The early benchmarks support short iterations. CVRP and especially VMEC++ make evaluation cost part of the research question.
+
+| Task | What the model produces | What the evaluator measures | Why I included it |
+|---|---|---|---|
+| **Online bin packing** | An item-to-bin priority function | Excess bins above a lower bound | Cheap architectural comparisons; exposes equivalent formulas and stagnation |
+| **26-circle packing** | Circle positions and radii | Sum of radii after containment and overlap checks | Geometric construction with explicit validity |
+| **Traveling Salesperson Problem (TSP)** | A tour constructor followed by fixed 2-opt | Tour-length gap to the split's reference | Transfer of search choices beyond bin packing |
+| **CPU matrix multiplication** | A compiled C kernel | Correctness and speedup over a naive kernel in the same binary | Kernel optimization without GPU hardware |
+| **Capacitated Vehicle Routing (CVRP)** | A Python policy with optional C local search | Valid capacity-constrained routes and gap to best-known solutions | Harder, time-limited optimization; memory and timing-noise studies |
+| **Stellarator design / ConStellaration P2** | A Python optimizer returning a Fourier boundary | VMEC++ equilibrium diagnostics, five constraints, and the P2 objective | Expensive evaluation, physical feasibility, and scientific provenance |
+
+All repository scores are maximized, so some are stored as negative excess or gap. Their units differ; comparisons belong within a task and evaluation contract. [Task implementations](src/evoharness/tasks/) · [Benchmark evidence](reports/data/benchmark-evidence.json)
+
+### Model access and the practical budget
+
+The experiments were shaped by limited compute and model access:
+
+- **Evaluation ran on CPUs.** This made the algorithmic tasks and CPU-based VMEC++ workflows accessible on my server. GPU-kernel benchmarks and large model-training evaluations were outside the available resources.
+- **Z.ai/GLM models were used extensively through a hosted endpoint.** The current checked configurations use `glm-5.2` and `glm-4.7` as role settings; these are configuration records, not a ranking of models.
+- **Claude was also used through subscription-backed CLI access** for research, critique, and orchestration. Historical subscription calls were not fully priced in the same dollar ledger as hosted model calls.
+- **Open-weight models are central to the next phase.** I want to test how far this approach can go with models that can be self-hosted, giving more control over inference capacity, data, and repeated experimentation. The documented runs used hosted access; self-hosted inference remains work to evaluate.
+
+The budget has several dimensions: model calls/tokens, solver calls, elapsed time, CPU resources, and memory. Recorded dollar figures do not represent the full cost of subscriptions and infrastructure. More compute would permit stronger comparisons and more search; whether it reliably improves discovery is an empirical question.
+
+<a id="architecture"></a>
+
+## 4. Architecture designs I explored
+
+### Controlled choices inside the loop
+
+The initial study exposed five binary choices: **32 configurations**. Later work expanded the implementation to the options below. There are now **168 valid combinations**, but that does not mean all have been experimentally compared.
+
+| Design choice | Implemented alternatives | Research question |
+|---|---|---|
+| **Feedback** | `score_only` · `reflections` · `memory` | Is a score enough, or does interpreting and retaining failures improve proposals? |
+| **Acceptance gate** | `public_only` · `holdout` · `quality_diversity` | Should selection use training performance, validation, or a frontier of different behaviors? |
+| **Search** | `greedy` · `islands` · `staged` · `bandit_fork` | Does one lineage suffice, or should the budget preserve and revisit alternatives? |
+| **Knowledge** | `off` · `task_notes` · `web` | Does domain knowledge help, and how should it enter the context? |
+| **Model roles** | `single_strong` · `split_roles` | Where is a more capable model most useful: generation or review? |
+
+`staged` search pushes toward redesign after stalls; `bandit_fork` allocates attempts across branches; quality-diversity selection retains behavioral alternatives. Web knowledge requires the memory path. The [configuration contract](src/evoharness/engine/config.py) and [strategy implementations](src/evoharness/strategies/) define the combinations.
+
+### Context management: from a score to reusable evidence
+
+| Context | What reaches the next proposal | Benefit and failure mode |
+|---|---|---|
+| **Immediate feedback** | Score, validity, recent parent/candidate comparison | Cheap and direct, but can repeat failed ideas |
+| **Curated task knowledge** | Fixed domain notes, evaluator semantics, known hazards | Supplies prior knowledge; must stay fixed in a controlled comparison |
+| **Reviewed persistent memory** | Evidence-linked failures, successful mechanisms, code differences, predictions, open questions | Reuses knowledge across runs; can retain stale diagnoses or contaminate comparisons |
+
+KernelEvolve's context-memory and retrieval design was particularly relevant. In EvoHarness, writers read bounded context and a reviewer updates generated memory. Task notes can be injected or accessed through tools. Optional web research passes through the review/memory path. There is no replicated study establishing a general advantage for memory plus web over memory alone.
+
+Several concrete failures changed this design:
+
+- A reviewer trusted a writer's description of its method and preserved a mistaken diagnosis. I added full code or code differences and required coverage of distinct approaches.
+- Repeated proposals between reviews motivated a digest of recent attempts.
+- Long research plans displaced measured physics outcomes; later prompts put evaluation evidence first.
+- Shared memory could leak between comparison arms. Controlled experiments therefore need isolated or frozen snapshots.
+
+Fixed knowledge lives in `src/evoharness/tasks/<task>/resources/knowledge.json`; generated memory lives in `.local/memory/<task>/`. [Memory](src/evoharness/strategies/memory.py) · [Knowledge](src/evoharness/strategies/knowledge.py)
+
+### Sub-agents and the DAG executor
+
+I explored giving agents distinct research responsibilities:
+
+| Role or mechanism | Responsibility | Evidence status |
+|---|---|---|
+| **Writer / reviewer** | Propose candidates and interpret outcomes | Implemented and used; role splitting was part of the initial screen |
+| **Refiner** | Synthesize recent attempts into a revised candidate | Used in later campaigns; no isolated general performance claim |
+| **Analyst** | Audit results, investigate failures, suggest directions | Used for research feedback; proposals still require evaluation |
+| **Branch workers** | Explore separate hypotheses or lineages, then hand off or merge candidates | Used in restartable campaigns; branch diversity alone did not establish new physics |
+| **Coordinator / referee** | Schedule dependent work and check predictions against artifacts | Implemented in the research portfolio; reports count only when their evidence validates |
+
+The **DAG executor** represents dependent work as a directed acyclic graph: explore branches, wait for required results, compare them, and pass selected artifacts to another stage. It organizes a campaign above individual optimizer loops. The historical branch executor ran sequentially under the CPU budget; the research portfolio also supports concurrent workers.
+
+```mermaid
+flowchart TD
+    H["Research question and fixed budget"] --> C["Coordinator defines hypotheses"]
+    C --> A["Worker A<br/>explores one mechanism"]
+    C --> B["Worker B<br/>explores another mechanism"]
+    A --> E["Task evaluator<br/>measures returned artifacts"]
+    B --> E
+    E --> R["Referee checks<br/>predictions and evidence"]
+    R --> S["Synthesis and next experiment"]
+```
+
+Agent activity and useful output were sometimes very different. One branch ran eight analyst sessions without injecting a candidate because file writes were blocked. Host-side extraction of returned code repaired that handoff. Later review-only multi-agent rounds improved evidence checking but performed no new physics evaluations.
+
+The architecture makes work traceable and supports broader exploration. It also adds model calls and coordination overhead. Existing campaigns do not establish that more agents outperform one writer at equal total budget. [Research store](src/evoharness/research/store.py) · [Portfolio workflow](src/evoharness/tasks/stellar_p2/workflows/research.py)
+
+<details>
+<summary><strong>Implementation map and full architecture illustrations</strong></summary>
+
+![Configured optimizer axes and separate physics and research controls.](reports/figures/optimizer-axes.svg)
+
+The blue selections describe the committed stellarator configuration, not a proven optimal architecture.
+
+```text
+src/evoharness/
+├── engine/        lifecycle, budgets, ledgers, configs, fingerprints
+├── strategies/    feedback, selection, search, knowledge, memory, model roles
+├── execution/     subprocesses, containers, resource limits
+├── research/      hypotheses, evidence contracts, scheduling, handoffs
+├── tasks/         six evaluator-owned task packages
+│   └── stellar_p2/
+│       ├── discovery/   constructors and structural search
+│       ├── physics/     score, gradients, fidelity, solver integration
+│       ├── workflows/   repair, discovery, factory, polish, verification
+│       └── proposals/   optional proposal mechanisms and converters
+├── app/           local API and UI
+└── analysis/      inventory, reports, figures
+```
+
+[Detailed system illustration](reports/figures/architecture.png) · [Optimizer layers](reports/figures/optimizer-layers.png). These two illustrations are AI-generated conceptual views; [visual provenance](reports/data/visual-provenance.json) records their prompts. Result plots are generated from evidence tables.
+
+</details>
+
+
+<a id="evidence-from-the-algorithmic-tasks"></a>
+<a id="current-research-state"></a>
+
+## 5. Results and research trajectory
+
+### Results at a glance
+
+| Experiment | Recorded outcome | What I can conclude |
+|---|---|---|
+| **Bin packing: 60-call run** | Training excess **4.590% → 1.829%**; selected candidate **1.379% private excess** | The loop improved a heuristic in a small recorded run |
+| **Bin packing: architecture screen** | **32 configurations × 3 seeds = 96 runs**, 20 calls each | A replicated descriptive comparison on one task and budget |
+| **CPU C kernel: 20-call run** | **16.06× private speedup** over the naive kernel | A correct local improvement; not a comparison with optimized BLAS |
+| **CVRP: memory case study** | Private gap **0.748% → 0.581%** between feedback arms | A promising example with noise and shared-history confounders |
+| **Stellarator: pinned-solver polish** | Official P2 **0.632082 → 0.634038**, using **715 solves** | A small inherited-basin improvement transferred to official fidelity |
+| **Stellarator: structural search** | VLF gains of about **+0.0136** became official losses | Cheap screening can select numerical artifacts |
+| **Stellarator: latest repair frontier** | Violation **0.0407015**, versus a **0.01** feasibility limit | Closer to feasibility in the imported-seed arm, still infeasible and not officially verified |
+
+The scientific tables describe the **2026-09-17 evidence review**; the inventory was refreshed on **2026-09-21**. These are dated results, not a live leaderboard. [Benchmark data](reports/data/benchmark-evidence.json) · [Stellarator data](reports/data/stellar-evidence.json) · [Offline evidence explorer](reports/index.html)
+
+### What the small benchmarks taught me
+
+![Descriptive effects of the five optimizer choices in the 96-run bin-packing screen.](reports/figures/screening-effects.svg)
+
+The original bin-packing screen compared all 32 binary configurations across three seeds. This table converts the stored scores into **private excess percentage**; lower is better.
+
+| Change | Mean excess before | Mean excess after | Reading of this screen |
+|---|---:|---:|---|
+| Score only → reflections | 4.034% | 3.860% | Small descriptive improvement |
+| Training gate → holdout gate | 3.843% | 4.051% | Worse descriptive mean at this budget |
+| Greedy → islands | 4.107% | 3.787% | Better mean with multiple lineages |
+| Knowledge off → task wiki | 4.366% | 3.529% | Better mean, but 43 of 48 wiki runs retained the seed score |
+| One strong model → split roles | 3.683% | 4.211% | Worse descriptive mean with split roles |
+
+These are descriptive marginal means; no confidence intervals or interaction estimates were recorded. The task-wiki result illustrates why a better average alone is insufficient: it often reflected avoiding regression rather than discovering improvements.
+
+Other experiments exposed different limits:
+
+- **Bin packing:** complicated formulas often produced the same bin ranking as best-fit. This motivated behavioral novelty, explicit tie feedback, and allowing useful equal-score alternatives to survive.
+- **TSP:** the original screen contained 96 runs, one failed endpoint, and 24 runs that stopped early on time. Islands had the opposite descriptive direction from bin packing. A later gate/search probe also showed interactions; there is no task-independent winner.
+- **Circle packing:** the evaluator and seed are preserved, but no historical optimization ledger is available. It demonstrates a task contract, not a measured optimizer success.
+- **C kernels:** the 16.06× result used private sizes 128 and 512 and a naive baseline timed in the same binary. It does not estimate success probability or hardware portability.
+
+<details>
+<summary><strong>CVRP: a useful memory case, and a lesson in measurement</strong></summary>
+
+The closest comparison started from the same ancestor and seed, with holdout selection, staged search, no web knowledge, and a $4 model budget per arm.
+
+| Feedback | Private gap | Model calls | Elapsed |
+|---|---:|---:|---:|
+| Score only | 0.748% | 96 | 8,405 s |
+| Shared memory | **0.581%** | 165 | 5,951 s |
+
+The difference was 0.167 percentage points, or 22.3% of the score-only gap. The memory arm reused known failures and preserved the strong C search kernel while adding a cheap, improving Python polish. However, reviewer calls differed, shared memory matured over time, and the anytime solver was sensitive to host timing.
+
+Repeated private measurements varied by 0.10–0.18 percentage points. I added near-tie re-evaluation, median-based reporting, and validation organized by customers per route rather than instance size alone. This motivated stronger evaluation controls; it does not isolate a causal memory effect.
+
+</details>
+
+<a id="how-the-project-evolved"></a>
+
+### How the research direction changed
+
+![Research trajectory from benchmark comparisons to memory, provenance audits, physics feedback, and repair.](reports/figures/research-trajectory.svg)
+
+| Phase | What I investigated | What changed in the design |
+|---|---|---|
+| **Initial benchmark study** | Five architectural choices across executable tasks | A common task contract, budgets, candidate history, and private evaluation |
+| **Reflection and memory** | Repeated mistakes and context across runs | Reviewed memory, code differences, predictions, and anti-repetition notes |
+| **Specialist agents and branching** | Analysts, refiners, restarts, branch merging | Persistent campaign state and evidence-based handoffs |
+| **Stellarator score audit** | Strong scores near inherited public boundaries | Margin accounting, normalized novelty descriptors, seed provenance |
+| **Physics feedback** | Solver failures, geometric tools, gradients, local polish | Richer diagnostics, metered solver access, constrained local steps |
+| **Fidelity correction and repair** | Structural changes and persistent feasibility search | Higher-fidelity checks, feedback-first prompts, separate provenance classes |
+
+The main progression was toward stronger experimental controls. Added complexity did not consistently improve outcomes, and several experiments changed what I considered sufficient evidence for a result.
+
+<a id="stellarator-evidence-in-depth"></a>
+
+## 6. Extending the ConStellaration/VMEC++ evaluator
+
+### The scientific task and the two optimization loops
+
+For the stellarator experiments I used [ConStellaration P2](https://github.com/proximafusion/constellaration), backed by [VMEC++](https://github.com/proximafusion/vmecpp). I extended the **evaluation interface, feedback, tools, and workflows around the solver**. The pinned authoritative environment uses `constellaration==0.2.6` and `vmecpp==0.4.11`. [Evaluator image](src/evoharness/tasks/stellar_p2/Dockerfile.eval)
+
+The model writes `solve(fm, rng)`: a program that proposes and tests Fourier representations of a stellarator boundary, then returns one boundary for clean re-evaluation.
+
+```mermaid
+flowchart TD
+    L["Outer loop: LLM writes an optimizer program"] --> P["Sandboxed program: solve(fm, rng)"]
+    P --> V["Inner loop: metered VMEC++ boundary evaluation"]
+    V -->|"Metrics, constraints, errors"| P
+    P --> B["Return boundary JSON"]
+    B --> C["Fresh evaluator container<br/>candidate code removed"]
+    C --> F["Verified result and diagnostics"]
+    F -->|"Feedback for the next program"| L
+```
+
+This creates two budgets: model proposals and the solver work inside each proposal. CPU accessibility does not make every evaluation cheap. A gradient estimate can consume many solves, and official verification can cost substantially more than a coarse screen.
+
+### What I added, and why
+
+| Extension | Reasoning | What was added / observed |
+|---|---|---|
+| **Metered solver access** | An evolved optimizer needs freedom to search without unlimited simulation cost | Solver-attempt limits, elapsed deadlines, timeouts, and recorded counts; failures also consume budget |
+| **Feasibility-aware feedback** | Official zero scores hide progress among infeasible designs | Negative worst normalized violation during search, objective `L`, raw metrics, individual constraints, errors, and the active constraint |
+| **Clean artifact verification** | Candidate code must not award itself the final score | Re-score only the returned boundary in a fresh evaluator container, without the candidate program |
+| **Margin and novelty diagnostics** | Gains may come from spending tolerance or reproducing a known design | Margin penalty, scale/gauge-normalized bank distance, cosine similarity, provenance/export checks |
+| **Cheaper nearby evaluations** | Solver latency restricts experimentation | A single-stage path omitting a redundant coarse stage in tested cases; true hot restart was rejected as default because it changed equilibria |
+| **Graded solver failures** | Some nonconverged solves contain useful information | Residual-based soft-failure feedback during search, ranked below converged evaluations |
+| **Geometry and metric gradients** | Random perturbations ignore available local structure | Exact aspect tools, differentiable metric diagnostics, finite differences through the pinned solver |
+| **Fidelity promotion** | Coarse discretizations can reward artifacts | Structural candidates screened at very low fidelity (VLF), promoted to low fidelity (LF), then checked officially |
+| **Feedback-first context** | Long plans could displace measured outcomes | Recent measurements, family failure counts, active constraints, incumbent code, and predictions placed before general prose |
+| **Persistent repair** | Seed repair and independent construction answer different questions | Named seeds, manifest hashes, evaluator fingerprints, saved attempts, and separate lineage classes |
+
+Implementation: [task/evaluator interface](src/evoharness/tasks/stellar_p2/task.py) · [physics tools](src/evoharness/tasks/stellar_p2/physics/) · [feedback assembly](src/evoharness/tasks/stellar_p2/discovery/evidence.py) · [repair workflow](src/evoharness/tasks/stellar_p2/workflows/repair.py).
+
+### Scores: informative feedback and a fixed final objective
+
+At official fidelity, P2 is `L / 20` only when **all five normalized constraint violations are at most 0.01**; otherwise it is zero. The constraints cover aspect ratio, elongation, rotational transform, mirror ratio, and quasi-isodynamicity (QI).
+
+During search, I exposed the negative worst violation for infeasible candidates. This provides a direction of progress before feasibility. Later experiments also tracked the following margin-adjusted selection diagnostic, called `honest_score` in the code:
+
+```text
+honest_score = p2_score - 0.92 × max(0, worst_violation - 0.002)
+```
+
+The official score remains unchanged. This diagnostic makes tolerance consumption visible; it does not certify novelty.
+
+![Official scoring, selection penalties, and evaluator feedback fields.](reports/figures/reward-feedback.svg)
+
+The inherited-seed experiments show why this distinction matters:
+
+| Recorded artifact | Official P2 | Worst violation | Interpretation |
+|---|---:|---:|---|
+| Highest raw legacy score | **0.6420577** | 0.0097398 | Legal score using 97.4% of tolerance; bank cosine **0.999998** |
+| Earlier campaign headline | 0.6400196 | 0.0093054 | Near its public ancestor; equal-margin estimate about **0.632** |
+| Low-margin inherited ceiling | 0.6344215 | 0.0019244 | More tolerance headroom, still inherited |
+| Recorded public reference | 0.6361 | 0.00075 | Used much less of the available tolerance |
+
+The raw record is valid under its pinned evaluator, but near-collinearity with a public seed is weak evidence for a new physical design. Uniform rescaling also initially looked novel in coefficient space, motivating scale-normalized distance.
+
+### Gradient feedback: a useful interface is not yet a better optimizer
+
+I first exposed exact geometry tools for the aspect constraint. They avoid solver calls for information available directly from the boundary. The difficult constraints, however, depend on the equilibrium.
+
+I then added downstream differentiable metrics and finite differences through the pinned VMEC++ solver. This is **not a VMEC adjoint**. A default 20-coefficient central-difference gradient requires 41 solves, so the information has substantial cost.
+
+| Experiment | Outcome | Lesson |
+|---|---|---|
+| **Aspect-only gradient A/B** | Two paired margin-adjusted deltas had opposite signs: **−0.00199 / +0.00288**; three of five arms kept their seed | No consistent benefit established; the tool addressed only one constraint |
+| **Pinned-solver finite-difference polish** | **17 steps / 715 solves**; official **0.632082 → 0.634038**; violation **0.004728 → 0.004361** | A small local improvement transferred to official evaluation |
+| **Full-gradient access for an LLM writer** | **18 of 49** candidates called `metric_grad`; the run retained its starting boundary | Tool availability and adoption do not establish better search |
+| **Different-solver gradient proposals** | VMEC++ 0.7.1 sidecar derivatives did not reliably descend the pinned 0.4.11 objective | Proposal tools may differ; the fixed evaluator decides which gains count |
+
+Local step size mattered: predictions were useful around coefficient changes of `1e-5`; changes near `1e-4` could switch the active grid minimum. Smoothing to support larger steps introduced bias comparable to the desired gain.
+
+The successful polish eventually stalled. Records disagree on the decisive explanation—constraint projection versus a search-margin penalty—and later evidence challenged the margin explanation. The supported finding is a modest, verified local gain followed by a stall. [Finite differences](src/evoharness/tasks/stellar_p2/physics/finite_difference.py) · [Metric tools](src/evoharness/tasks/stellar_p2/physics/metrics/)
+
+### Fidelity: a better screening score became a worse result
+
+Two high-order structural transformations initially looked substantially better at VLF:
+
+| Transform | Change in VLF margin-adjusted score | Change in official score |
+|---|---:|---:|
+| Band seed 3 | **+0.013634** | **−0.001663** |
+| Band seed 5 | **+0.013603** | **−0.000706** |
+
+Higher-fidelity evaluation reversed the conclusion. After the correction, 56 inherited candidates were evaluated, six were officially confirmed, and two beat their source officially. The best official improvement was only **+0.0001831**.
+
+This was a central finding: an optimizer can successfully maximize a screening objective while exploiting its numerical resolution. More search against that objective can strengthen the apparent result without improving the underlying design.
+
+### Later runs: better context, persistent repair, and the remaining gap
+
+One context failure was particularly instructive: a campaign placed a roughly 26,000-character plan before the evidence, then truncated the context at 12,000 characters. Measured physics outcomes never reached the writer. I changed context assembly to put measurements and failure summaries first. This repaired information flow; it was not a controlled demonstration of a score gain.
+
+The later repair workflow also retained incumbent code, recent attempts, named seed provenance, and explicit **Idea / Prediction / Memory** fields. It keeps a persistent account of what was measured and which constraint is limiting.
+
+![Separate stellarator trajectories, repair milestones, and fidelity reversals.](reports/figures/evaluation-trajectory.svg)
+
+The latest persisted repair run used declared scientific-database or self-generated seeds with the public leaderboard bank disabled:
+
+| Measure | Recorded state |
+|---|---:|
+| Rounds / evaluated proposals | 694 / 569 |
+| Evaluation failures / proposal failures | 123 / 2 |
+| Accepted events | 12 |
+| Best worst normalized violation | **0.0407015261** at VLF |
+| Required feasibility limit | **0.01** |
+| Limiting edge mirror ratio | **0.2081403**, against a **0.2** bound |
+| Objective `L` / P2 | **3.58147 / 0** |
+| Official re-evaluation | **Not performed for this frontier** |
+
+The meaningful frontier was already reached at round 93. The nominal best at round 212 improved violation by only about `8.6e-12`; that is not substantive progress. The run exhausted its cumulative 3,000-call limit at call 3,001.
+
+Repair moved closer to feasibility but sacrificed performance: even if this boundary became feasible at the same `L`, P2 would be only about **0.179**. The next step must preserve the repaired constraints while recovering performance.
+
+The provenance classes must remain separate:
+
+- **Unaided construction:** the best initial stochastic attempt reached violation **0.4253**, still with P2 zero. Later independent structural census work produced **zero promotable leaders** from 68 jobs: 35 evaluated and 33 failed.
+- **Public-seed refinement:** produced the official local gains above, with inherited ancestry.
+- **Scientific-seed repair:** reached the **0.04070** VLF frontier. Disabling the public bank does not remove ancestry from imported configurations.
+
+The repair milestones can switch between seeds. They are selected accepted observations, not a single boundary's learning curve. [Plot data](reports/data/design-view.json) · [Detailed evidence](reports/data/stellar-evidence.json)
+
+
+## 7. Novelty, reward hacking, and what counts as evidence
+
+### Can novelty be ensured?
+
+There is no general novelty guarantee from an evolutionary loop. A different program can implement the same behavior; a different coefficient vector can describe essentially the same geometry; an apparently independent result can depend on imported seeds or accumulated memory.
+
+I therefore treat novelty as a claim requiring several kinds of evidence:
+
+| Question | Current approach | Remaining limitation |
+|---|---|---|
+| **Is the behavior different?** | Behavioral comparisons, tie handling, quality-diversity archives | Different behavior can still be worse or uninteresting |
+| **Is the design structurally different?** | Normalized coefficient distances, cosine similarity, typed structural mechanisms | Distance alone does not establish a new physical mechanism |
+| **Where did it come from?** | Seed manifests, parent history, public-bank access, scientific-data provenance | A bank blackout does not erase imported ancestry |
+| **Is the gain real?** | Held-out checks, repeated timing, clean artifact re-evaluation, fidelity promotion | Same-stack verification is not independent-solver validation or external replication |
+
+The goal is a useful, verified improvement with an inspectable origin. Novelty pressure should preserve promising alternatives without rewarding arbitrary distance from good solutions.
+
+### How I reduced misleading rewards
+
+| Failure mode observed | Response in the research system |
+|---|---|
+| Equivalent bin-packing formulas appear new | Compare behavior and make ties explicit |
+| CVRP timing variation looks like progress | Re-evaluate near ties and report repeated measurements |
+| Candidate code influences its own reported result | Let trusted task code validate outputs; re-score stellarator boundaries without candidate code |
+| A stellarator consumes almost all feasibility tolerance | Report raw constraints and margin-adjusted diagnostics alongside official P2 |
+| A coarse solver rewards high-order artifacts | Promote through fixed higher-fidelity evaluations |
+| A reviewer preserves an unsupported explanation | Give it code, measurements, and source artifacts; require evidence before accepting the claim |
+| A busy campaign produces no new measurements | Count evaluated artifacts, failures, and verified outcomes separately from calls or agent sessions |
+
+These controls reduce particular failure modes; they do not make reward hacking impossible. The evaluator's design remains part of the research.
+
+For stellarator claims, I retain at least:
+
+```text
+official score · objective L · constraint violations · fidelity
+evaluator fingerprint · seed/parent provenance · bank distance/similarity
+solver and model budgets · repeated-evaluation status
+```
+
+<a id="install-and-inspect"></a>
+
+## 8. Running and inspecting the project
+
+### Quick start
+
+Python 3.11+ and `uv` are required:
 
 ```bash
 uv sync --group dev --group analysis
@@ -48,39 +451,68 @@ uv run evoharness tasks
 uv run evoharness axes
 ```
 
-`doctor` reports optional runtime dependencies separately, so a lightweight benchmark installation does not pretend to be ready for VMEC-backed physics. Copy `.env.example` to `.env` and set the provider key required by the selected model before a paid model run. A zero-model-call or seed-only configuration needs no provider key.
+Copy `.env.example` to `.env` and set the provider key required by the selected model before a model run. The main loop uses `ZAI_API_KEY`. Seed-only or zero-model-call configurations need no provider key. `doctor` reports optional runtime dependencies separately.
 
-Each task has a checked configuration in [`configs/`](configs/):
+Inspect a configuration before running it:
+
+```bash
+uv run evoharness run --config configs/binpacking.json --dry-run
+```
+
+Then run the chosen task:
 
 ```bash
 uv run evoharness run --config configs/binpacking.json
-uv run evoharness run --config configs/circles.json
-uv run evoharness run --config configs/tsp.json
-uv run evoharness run --config configs/matmul_c.json
-uv run evoharness run --config configs/cvrp.json
-uv run evoharness run --config configs/stellar_p2.json
 ```
 
-Download benchmark data explicitly and keep it local:
+The six checked configurations are in [configs/](configs/). TSP and CVRP datasets are downloaded explicitly:
 
 ```bash
 uv run evoharness fetch tsp
 uv run evoharness fetch cvrp
 ```
 
-Fetched instances are stored in `.local/data/tsp/` and `.local/data/cvrp/`; they are not bundled into the package or application image.
-
-The local application and evidence tools use the same package entry point:
+These datasets live under `.local/data/`. For the UI and analysis entry points:
 
 ```bash
 uv run evoharness serve
 uv run evoharness report --help
 uv run evoharness screen --help
 uv run evoharness inventory
-uv run evoharness figures
 ```
 
-The root `Dockerfile` and `compose.yml` are an optional lightweight UI/runtime deployment. They deliberately do not mount the host Docker socket. Run CVRP, stellarator, and `require_container` experiments from the host CLI with Docker daemon access unless an operator has explicitly provided an external container-execution service. The generic evaluator image is built lazily on first use, before a model call; it can also be prepared directly:
+The [offline evidence explorer](reports/index.html) opens without an application server.
+
+### Reproduce an architectural choice
+
+Copy a configuration and vary the intended factor while holding the other settings fixed. For example:
+
+```bash
+uv run evoharness run --config configs/binpacking.json \
+  --set switches.feedback=memory \
+  --set switches.knowledge=task_notes \
+  --dry-run
+```
+
+Remove `--dry-run` to execute. Use separate `EVOHARNESS_HOME` directories or frozen memory snapshots for controlled comparisons.
+
+<details>
+<summary><strong>Additional model, memory, and execution controls</strong></summary>
+
+| Control | Setting |
+|---|---|
+| Model identities | `--set models.strong=MODEL` / `--set models.cheap=MODEL` |
+| Refiner | `--set refiner=MODEL` / `--set refiner_every=5` |
+| Analyst | `--set analyst=MODEL` / `--set analyst_every=10` |
+| Analyst research / candidate injection | `--set analyst_web=true` / `--set analyst_inject=1` |
+| Memory review cadence | `--set review_every=20` |
+| Resume / second parent | `--set resume_from=RUN_ID` / `--set merge_from=RUN_ID` |
+| Stall limit | `--set stall_stop=20` |
+| Require container execution | `--execution require_container` |
+
+Task-default execution uses temporary subprocesses or task-specific containers. Subprocess limits are suitable for cooperative research code; they are not a hostile multi-tenant security boundary. Container evaluators add network removal, capability restrictions, resource caps, and reproducible dependencies.
+
+The generic evaluator image can be built in advance:
 
 ```bash
 docker build -t evoharness-benchmark-eval \
@@ -88,111 +520,13 @@ docker build -t evoharness-benchmark-eval \
   src/evoharness/execution
 ```
 
-The command reference is available through `uv run evoharness --help` and each subcommand's `--help`. Run directories are created below `.local/runs/`; a run's append-only ledger, effective config, fingerprints, candidates, and final artifacts form its evidence packet.
+The root `Dockerfile` and `compose.yml` provide a lightweight UI/runtime deployment without mounting the host Docker socket. Run CVRP, stellarator, and required-container experiments from a host CLI with Docker daemon access.
 
-### Activating memory and other axes
+</details>
 
-![Configured optimizer axes, separate execution and physics controls, latest persisted repair workflow, and optional research DAG.](reports/figures/optimizer-axes.svg)
+### Run the stellarator workflows
 
-*Blue selections come from `configs/stellar_p2.json`. The persistent repair workflow and research DAG have separate entry points and state. The figure is regenerated from the committed configuration and reviewed evidence.*
-
-The committed JSON files are readable experiment specifications, not hidden defaults. Copy a config for an experimental arm and override only the declared axis being studied. For example, activate reviewed memory with `feedback=memory` and select curated task notes with `knowledge=task_notes`:
-
-```bash
-uv run evoharness run --help
-uv run evoharness run --config configs/binpacking.json \
-  --set switches.feedback=memory \
-  --set switches.knowledge=task_notes \
-  --dry-run
-```
-
-Remove `--dry-run` after inspecting the resolved config. `knowledge_mode=inject` places selected notes directly in the prompt; `knowledge_mode=tool` makes them available through bounded reads. Generated reviewed memory always lives under `.local/memory/<task>/`. Use separate snapshots for controlled comparisons; a shared evolving memory can transfer useful failures, but it also contaminates an ablation and can preserve stale diagnoses. Fixed, curated task knowledge belongs in `src/evoharness/tasks/<task>/resources/knowledge.json`; model-facing task instructions belong in `resources/*.txt`. Neither is generated memory.
-
-The current five configurable axes have a raw Cartesian product of 216 combinations. Because `knowledge=web` requires `feedback=memory`, **168 configurations are valid**. The original study used two values per axis, hence its historical **2⁵ = 32** configurations.
-
-| Axis | Values | Experimental meaning |
-|---|---|---|
-| `feedback` | `score_only`, `reflections`, `memory` | Scalar feedback; verbal comparison; or durable task memory maintained from evidence |
-| `gate` | `public_only`, `holdout`, `quality_diversity` | Train-score admission; validation-backed admission; or a quality/diversity frontier |
-| `search` | `greedy`, `islands`, `staged`, `bandit_fork` | One lineage; migrating niches; forced redesign after stalls; or bandit-directed branching |
-| `knowledge` | `off`, `task_notes`, `web` | No retrieval; curated local task knowledge; or sourced research delivered through memory |
-| `roles` | `single_strong`, `split_roles` | One stronger writer/reviewer model; or cheaper generation with stronger critique |
-
-Compile/parse repair, resume, branch merge, analyst and refiner roles, campaign orchestration, fidelity promotion, and memory isolation are independent controls. They must be recorded in the effective config rather than presented as additional orthogonal axes.
-
-Execution is also a design axis even though it is not one of the five screening switches. Each task selects its appropriate backend by default. Python and C artifacts run with time and resource limits in temporary subprocesses; task-specific Docker evaluators add network removal, capability dropping, memory/CPU caps, and reproducible dependencies. Set `execution=require_container` when an experiment must fail closed if it cannot be containerized. The ordinary subprocess fallback uses rlimits, a timeout, a temporary directory, and network namespace isolation when available. It is suitable for cooperative research code, not hostile multi-tenant execution. CVRP results are validated and repriced by host code. Stellarator boundaries are re-scored in a fresh evaluator container after candidate code has been removed.
-
-```bash
-uv run evoharness run --config configs/binpacking.json \
-  --execution require_container \
-  --dry-run
-```
-
-## Tasks and score contracts
-
-Task IDs and package directories are stable: `binpacking`, `circles`, `tsp`, `matmul_c`, `cvrp`, and `stellar_p2`.
-
-| Task | Evolved artifact | Maximized score | Evidence boundary |
-|---|---|---|---|
-| [`binpacking`](src/evoharness/tasks/binpacking/) | Online priority function | Negative mean fractional excess over the L1 lower bound | Generated train/private instances; many different formulas are behaviorally identical under `argmax` |
-| [`circles`](src/evoharness/tasks/circles/) | Complete valid 26-circle construction | Sum of radii | Evaluator checks containment and overlap |
-| [`tsp`](src/evoharness/tasks/tsp/) | Tour constructor followed by fixed 2-opt | Negative mean percent gap | TSPLIB private optima; generated splits use the fixed baseline as reference |
-| [`matmul_c`](src/evoharness/tasks/matmul_c/) | Compiled C matrix-multiplication kernel | Geometric-mean speedup | Correctness against the naive result; candidate and baseline timed in the same binary |
-| [`cvrp`](src/evoharness/tasks/cvrp/) | Python policy with optional compiled C local search | Negative mean percent gap to BKS | Host validates routes, capacity, customer coverage, deadlines, and distance |
-| [`stellar_p2`](src/evoharness/tasks/stellar_p2/) | Python `solve(fm, rng)` optimizer returning a Fourier boundary | `objective_L / 20` only when every official normalized violation is at most `0.01` | Metered inner solver; clean returned-boundary re-score in the pinned physics image |
-
-Scores use different units and must not be pooled. For human-scale plots, use excess percent for bin packing, gap percent for TSP/CVRP, sum of radii for circles, speedup for `matmul_c`, and the fidelity-qualified P2 tuple for stellarators.
-
-## Architecture
-
-![Optimizer layers: experiment contract, fixed-weight model proposal, search, context, task evaluation, and execution evidence.](reports/figures/optimizer-layers.png)
-
-*Functional layers, not a sequence of neural-network training operations. The model weights stay fixed; programs, context, and archives change between trials. Each experiment enables only its declared mechanisms.*
-
-The installable package separates reusable mechanisms from task science:
-
-```text
-src/evoharness/
-├── engine/        run lifecycle, budgets, ledgers, configs, experiment fingerprints
-├── strategies/    feedback, gates, search, knowledge, memory, and model roles
-├── execution/     Python/C subprocesses, Docker evaluators, limits, and isolation
-├── research/      hypothesis portfolios, evidence contracts, orchestration, and handoffs
-├── tasks/         six evaluator-owned task packages and immutable resources
-│   └── stellar_p2/
-│       ├── discovery/   constructors and structural search
-│       ├── physics/     score, gradients, fidelity, and evaluator integration
-│       ├── workflows/   repair, discovery, factory, polish, and verification
-│       └── proposals/   optional proposal mechanisms and converters
-├── app/           local API, event stream, and UI
-├── cli.py         unified command-line entry point
-└── analysis/      run inventory, screening summaries, reports, and figures
-```
-
-The main source boundaries are the [run engine](src/evoharness/engine/loop.py), [configuration contract](src/evoharness/engine/config.py), [strategies](src/evoharness/strategies/), [execution policy](src/evoharness/execution/policy.py), [sandbox implementation](src/evoharness/execution/sandbox.py), [research store](src/evoharness/research/store.py), [task implementations](src/evoharness/tasks/), [CLI](src/evoharness/cli.py), and [analysis package](src/evoharness/analysis/). Stellarator-specific work is split among [discovery](src/evoharness/tasks/stellar_p2/discovery/), [physics](src/evoharness/tasks/stellar_p2/physics/), [workflows](src/evoharness/tasks/stellar_p2/workflows/), and optional [proposals](src/evoharness/tasks/stellar_p2/proposals/).
-
-A regular run starts from a task seed, asks a model for a complete replacement, executes it under the task's policy, evaluates train and optional validation splits, applies the selected gate and search policy, then records every decision. An experiment fingerprint captures configuration, source state, task inputs, evaluator settings, and memory identity. Budget checks happen between expensive operations, so an in-flight model call or evaluation can cross a nominal time or spend ceiling before the next check.
-
-Stellar P2 adds a second optimization level. The model writes an optimizer program; that program spends a metered inner VMEC budget to construct a boundary. The returned boundary is then re-scored without candidate code. This protects the score boundary, but same-stack re-scoring is not independent-solver validation or external replication.
-
-Research orchestration sits above runs. A coordinator can register hypotheses, predictions, dependent worker tasks, evidence paths, referee checks, and synthesis. It is an epistemic control plane rather than an evaluator: worker reports remain untrusted until their referenced artifacts and hashes validate. The historical DAG campaign and the newer research portfolio are campaign policies, not mandatory stages of every evolution run.
-
-### Stellarator commands and evaluator
-
-The stellarator CLI names the distinct claim each workflow can support:
-
-```bash
-uv run evoharness stellarator repair --help
-uv run evoharness stellarator discover --help
-uv run evoharness stellarator research --help
-uv run evoharness stellarator evaluate --help
-uv run evoharness stellarator factory --help
-uv run evoharness stellarator polish --help
-uv run evoharness stellarator export --help
-```
-
-`repair` accepts declared, provenance-tagged scientific seeds and minimizes constraint violation before performance. `discover` uses independent constructors with public-bank blackout. `research` manages hypotheses and artifact-backed adjudication. `evaluate` re-scores a saved artifact without proposal code. `factory` searches constructor recipes. `polish` performs trusted local improvement. `export` packages a checked artifact with its lineage and evaluator metadata.
-
-Prepare the solver image on a Docker-capable host:
+Prepare the pinned evaluator on a Docker-capable host:
 
 ```bash
 docker build -t evoharness-stellar-eval \
@@ -200,7 +534,17 @@ docker build -t evoharness-stellar-eval \
   src/evoharness/tasks/stellar_p2
 ```
 
-To inspect the latest repair design using the preserved local seed database, create a separate run directory and print its prompt without a model call:
+| CLI workflow | Purpose |
+|---|---|
+| `stellarator repair` | Repair declared, provenance-tagged scientific seeds |
+| `stellarator discover` | Independent construction with public-bank blackout |
+| `stellarator research` | Coordinate hypotheses, worker tasks, and evidence review |
+| `stellarator evaluate` | Re-score a saved boundary without proposal code |
+| `stellarator factory` | Search constructor recipes |
+| `stellarator polish` | Apply trusted local improvement |
+| `stellarator export` | Package a checked artifact with lineage and metadata |
+
+Each command exposes its arguments through `--help`. For example, inspect the repair prompt without a model call:
 
 ```bash
 uv run evoharness stellarator repair \
@@ -210,9 +554,28 @@ uv run evoharness stellarator repair \
   --print-prompt
 ```
 
-The seed database is local research data; a fresh clone must supply its own provenance-tagged boundary JSONs through `--seed-dir`. Remove `--print-prompt` to execute that bounded experiment. Reusing a run directory resumes its persisted state and cumulative call/spend accounting. Seed-manifest or evaluator-fingerprint changes fail validation; use a new run directory for a changed experimental contract. The prior automated restarter and seed factory were paused during this migration; no paid campaign was restarted.
+The seed database is local research data; a fresh clone must supply provenance-tagged boundary JSONs through `--seed-dir`. Removing `--print-prompt` executes the experiment. Reusing a run directory resumes its cumulative budget and state; use a new directory when changing the seed manifest or evaluator contract.
 
-For the independent construction arm, use `stellarator discover` with the same run/budget flags and a distinct run directory. For a coordinator/worker experiment, choose the backend allocation explicitly:
+<details>
+<summary><strong>Physics controls and a coordinator/worker example</strong></summary>
+
+Set physics environment variables before starting the process; task import captures several of them. The experiment specification records their effective values.
+
+| Control | Setting | Meaning |
+|---|---|---|
+| Public bank blackout | `STELLAR_NO_BANK=1` | Disable public-bank access; imported scientific seeds retain ancestry |
+| Inner search budget | `STELLAR_TRAIN_OVERRIDES='{"max_evals":160,"cpu_budget":480.0,"eval_timeout":180.0}'` | Solver-attempt and time limits; the historical `cpu_budget` parameter enforces an elapsed-time deadline |
+| Geometry tools | `STELLAR_MARGIN_GRAD=1` | Expose boundary-only aspect/margin tools; default enabled |
+| Solver metric gradients | `STELLAR_FULL_GRAD=1` | Enable the pinned finite-difference/JAX service; default disabled |
+| Training fast path | `STELLAR_HOT_RESTART=0` | Disable the fast path; the enabled default uses single-stage evaluation, not true equilibrium reuse |
+| Nonconvergence feedback | `STELLAR_SOFT_FAIL=0` | Remove graded soft failures for a control arm |
+| Margin shaping | `STELLAR_MARGIN='{"target":0.002,"slope":0.92}'` | Penalize tolerance consumption during selection |
+| Novelty shaping | `STELLAR_NOVELTY='{"min":0.003,"pen":0.05}'` | Bank-distance shaping; no guarantee of independence |
+| Container memory | `STELLAR_MEM_MB=4096` | Set the candidate memory limit; gradients may require more |
+
+Persistent workflows set inner budgets from their own flags. Keep model settings, memory, seed origin, fidelity, solver image, and thread policy fixed within a comparison.
+
+A bounded coordinator/worker run can be configured as follows:
 
 ```bash
 uv run evoharness stellarator research \
@@ -221,253 +584,28 @@ uv run evoharness stellarator research \
   --tasks 4 --workers 2 --rounds 1 --total-budget-usd 2
 ```
 
-The Z.ai backend reasons over supplied evidence and has no repository shell tools. Claude/Codex backends can inspect the repository and optionally use isolated worktrees; their installed CLI authentication is separate from `ZAI_API_KEY`. `--plan-only` still calls the coordinator and is **not** a free dry run. This portfolio executor is separate from the writer/refiner/analyst roles inside `run`.
-
-| Additional control | Activation in `run --set ...` | Scope |
-|---|---|---|
-| Writer and cheaper model | `models.strong=MODEL`, `models.cheap=MODEL` | Model identities behind the selected role policy |
-| Refinement | `refiner=MODEL`, `refiner_every=5` | Periodic synthesis of the recent candidate window |
-| Independent analyst | `analyst=MODEL`, `analyst_every=10` | Evidence review and proposed directions |
-| Analyst research/injection | `analyst_web=true`, `analyst_inject=1` | Web tools and bounded candidate proposals, still evaluated and gated |
-| Memory review cadence | `review_every=20` | Reviewer updates to generated task memory |
-| Continue or combine lineages | `resume_from=RUN_ID`, `merge_from=RUN_ID` | Resume an accepted artifact or show a second parent |
-| Terminate stalled branch | `stall_stop=20` | Stop after consecutive candidates without a new best |
-| Separate runtime and memory | `EVOHARNESS_HOME=/path/to/arm` before the command | Independent data/run/memory root for an experimental arm |
-
-The authoritative environment pins ConStellaration 0.2.6 and VMEC++ 0.4.11. VMEC++ arrives through ConStellaration. Use `doctor` to check that the evaluator image is available before a campaign. Evaluator settings, image identity, thread policy, seed origin, bank access, and fidelity must stay fixed within a comparison. `STELLAR_NO_BANK=1` must be active before task import for independent work; a bank-enabled descendant must be labelled as a refinement.
-
-<details>
-<summary><strong>VMEC feedback and evaluator controls</strong></summary>
-
-Set these environment variables before starting the process; task import captures the bank, shaping, and inner-budget settings. `ExperimentSpec` records their effective values.
-
-| Control | Setting | Effect |
-|---|---|---|
-| Public seed bank | `STELLAR_NO_BANK=1` | Disables public-bank access; imported scientific seeds still retain their provenance |
-| Inner optimizer budget | `STELLAR_TRAIN_OVERRIDES='{"max_evals":160,"cpu_budget":480.0,"eval_timeout":180.0}'` | Sets candidate solver-call and time limits, separate from outer model budgets |
-| Boundary-only feedback | `STELLAR_MARGIN_GRAD=1` (default) | Exposes analytic aspect/margin tools; `0` removes the tools and their prompt description |
-| Solver metric gradients | `STELLAR_FULL_GRAD=1` (default `0`) | Ships the pinned finite-difference/JAX gradient service into the evaluator |
-| Solver execution path | `STELLAR_HOT_RESTART=0` | Disables the training fast path; the default mode is `single_stage`, not reuse of a previous equilibrium |
-| Nonconvergence feedback | `STELLAR_SOFT_FAIL=0` | Removes graded residual penalties; useful as a matched control arm |
-| Feasibility-margin shaping | `STELLAR_MARGIN='{"target":0.002,"slope":0.92}'` | Penalizes tolerance consumption during selection |
-| Novelty shaping | `STELLAR_NOVELTY='{"min":0.003,"pen":0.05}'` | Applies the configured bank-distance shaping policy; does not certify independence |
-| Container memory | `STELLAR_MEM_MB=4096` | Bounds candidate container memory; full-gradient experiments may require a larger explicit limit |
-
-For example, compare `STELLAR_FULL_GRAD=0` and `1` using the same config, seed origin, memory snapshot, budgets, and official verification. Enabling a gradient tool changes the available information; it does not demonstrate useful tool adoption or better search. The persistent repair/discovery workflows set their inner budgets from their own CLI flags.
+The Z.ai backend reasons over supplied evidence without repository shell tools. Claude/Codex backends can inspect the repository and use separately authenticated CLIs. `--plan-only` still calls the coordinator and is not a free dry run.
 
 </details>
 
-## Evidence from the algorithmic tasks
+<a id="reproducibility-and-evidence-policy"></a>
 
-![Descriptive private-score effects of five optimizer choices in the original 96-run bin-packing screen.](reports/figures/screening-effects.svg)
+### Evidence and reproducibility
 
-*Balanced marginal means from 32 configurations × three seeds. Effects are specific to this task, budget, and experiment; the detailed findings below explain the ties and confounders.*
+| Location | Contents |
+|---|---|
+| [reports/data/](reports/data/) | Committed evidence summaries, inventory, and plot data |
+| [reports/figures/](reports/figures/) | Research diagrams and generated result plots |
+| `.local/runs/` | Raw ledgers, configurations, candidates, state, evaluator artifacts |
+| `.local/memory/` | Generated task memory and snapshots |
+| `.local/data/` / `.local/reference/` / `.local/external/` | Downloaded instances, reference material, external tools |
+| [tests/](tests/) | Engine, execution, task, research, and physics checks |
 
-<details>
-<summary><strong>Bin packing: replicated factorial and later mechanism probes</strong></summary>
+Raw local data and mutable memory are intentionally untracked. A fresh clone includes the reviewed summaries, not every historical conversation or candidate. Some historical source paths in the evidence manifests use the pre-refactor layout.
 
-The cleanest optimizer comparison is the original 96-run factorial: 32 binary configurations × three seeds, capped at 20 model calls per run. Mean private-score main effects (`option B − option A`) were:
+The 2026-09-21 inventory recorded **337 JSONL ledgers, 107,186 rows, 141 run groups, and zero malformed rows**. All 8,924 rows added since the September 17 review were factory `llm_error` events, not new physical results.
 
-| Axis change | A mean | B mean | Delta |
-|---|---:|---:|---:|
-| score-only → reflections | -0.0403 | -0.0386 | **+0.00174193** |
-| public-only → holdout | -0.0384 | -0.0405 | **-0.00207719** |
-| greedy → islands | -0.0411 | -0.0379 | **+0.00320359** |
-| knowledge off → task wiki | -0.0437 | -0.0353 | **+0.00836853** |
-| one strong model → split roles | -0.0368 | -0.0421 | **-0.00528355** |
-
-These are balanced descriptive marginal means, not confidence-bounded causal effects. Of the 48 task-wiki runs, 43 ended exactly at the seed's private score (`-0.03483224`), so the positive mean does not show reliable improvement. Private endpoints ranged from `-0.18218` to `-0.01148`; costs were $0.02–$0.09 per run.
-
-A separate 60-call trajectory spent $0.1492, moved train excess from 4.590% to 1.829%, and selected a candidate with 1.379% private excess. Compared with a separate best-fit measurement of 3.483%, that is a 60.4% reduction, but the different configurations and budgets make it a capability comparison rather than an ablation.
-
-In the later one-seed gate/search probe, quality diversity reduced private excess from 1.575% to 1.037% under staged search and from 2.370% to 0.959% under bandit-fork. It justified more testing; one seed cannot rank the policies generally.
-
-The main failure mode was behavioral equivalence: elaborate formulas often preserved the same ordering as best-fit. Strict gates then froze on ties. This motivated behavioral novelty, tie acceptance, newest-on-tie selection, and explicit tie feedback.
-
-</details>
-
-<details>
-<summary><strong>Circle packing, TSP, and C matrix multiplication</strong></summary>
-
-**Circle packing.** The deterministic 26-circle evaluator and seed are preserved, but no historical optimization ledger is. The grid seed has radius `0.5 / 6 - 1e-4` per circle, sum `2.1640667`, about 82.1% of the evaluator's approximate `2.635` reference. This is evaluator-only evidence.
-
-**TSP.** The original screen contains 96 ledgers: 95 finite private endpoints and one `-Infinity` failure sentinel. Excluding the sentinel, scores range from `-11.50545` to `-0.85684`, with mean `-4.56241`. Task knowledge had a descriptive `+1.16673` effect and islands `-0.98778`, the opposite search direction from bin packing. The exclusion breaks factorial balance, and 24 runs hit the 900-second limit after 7–19 calls while 72 reached 20 calls. These are diagnostics, not treatment estimates.
-
-The later one-seed 2×2 showed a crossover: holdout/staged `-4.93639`, holdout/bandit-fork `-0.80563`, quality-diversity/staged `-0.83348`, and quality-diversity/bandit-fork `-3.31741`. Each search policy won under a different gate, with unequal stopping reasons.
-
-**C matrix multiplication.** One preserved 20-call run moved from a `0.9886×` train seed to `15.0891×` train and `16.0605×` private on sizes 128/512, for $0.143. Correctness required `max_abs_diff <= 1e-7*n`. The normalization reduces host-load confounding because the naive kernel and candidate run in the same binary. It is not a BLAS comparison, portable throughput claim, or success-rate estimate.
-
-</details>
-
-<details>
-<summary><strong>CVRP: useful memory case, noisy measurement</strong></summary>
-
-The closest documented comparison used seed 3, the same resumed ancestor, holdout gate, staged search, no web knowledge, one strong writer, and a $4 cap:
-
-| Feedback | Best candidate | Private gap | Calls | Elapsed |
-|---|---|---:|---:|---:|
-| score-only | `c0033r1` | 0.748% | 96 | 8,405 s |
-| shared memory | `c0035` | **0.581%** | 165 | 5,951 s |
-
-The 0.167 percentage-point difference is 22.3% relative. It is a single-seed case study, and the arms differ in reviewer calls, elapsed time, and shared-memory maturity. It shows that the memory arm reused earlier failures and ended better; it does not isolate the effect of memory.
-
-The winning family kept the proven C LNS kernel and added cheap, strictly improving Python Or-opt polish. Large Python overlays, C-kernel rewrites, budget slicing, multi-start, broad KNN changes, and persistent single C calls repeatedly crashed, tied, or starved the seed kernel.
-
-Measurement noise materially affected selection. Semantically identical code moved from `-0.0906` to `-0.0072` on train and `-0.0236` to `-0.1602` on validation; repeated private measurements spanned 0.10–0.18 gap points. This led to near-tie re-evaluation, medians, and a validation split organized by customers per route (`n/k`) rather than instance size alone. Longitudinal CVRP endpoints cannot be pooled because the evaluator, splits, memory, noise controls, and run stages changed.
-
-</details>
-
-Aggregate tables used by the README and figures live in [`reports/data/`](reports/data/). The underlying local ledgers remain under `.local/runs/`; generated aggregates are navigation aids, while ledgers and evaluator artifacts are the source evidence.
-
-## Stellarator evidence in depth
-
-![Stellarator evidence: accepted repair milestones, independent constructor failures, fidelity reversals, and the strength of different experimental comparisons.](reports/figures/evaluation-trajectory.svg)
-
-*Each panel retains its own experiment and score semantics. Accepted repair landmarks are selected observations, not a complete learning curve; imported seeds and unaided constructors are separate provenance classes. [Vector PDF](reports/figures/evaluation-trajectory.pdf) · [Plot data](reports/data/design-view.json).*
-
-<details open>
-<summary><strong>Score semantics and provenance</strong></summary>
-
-![Stellarator scoring contract: official P2, non-private selection penalties, and the feedback fields retained by the optimizer.](reports/figures/reward-feedback.svg)
-
-*Code-level definitions, not measured effect sizes. Official scoring, selection pressure, and feedback content remain distinct. [Vector PDF](reports/figures/reward-feedback.pdf).*
-
-At official fidelity, the boundary receives `objective_L / 20` only when all five normalized violations are at most `0.01`; otherwise P2 is zero. During search, infeasible boundaries receive the negative worst violation to provide a slope below the feasibility wall. Later campaigns added:
-
-```text
-honest_score = p2_score - 0.92 × max(0, feasibility - 0.002)
-```
-
-This exposes score bought by walking toward the official tolerance. It is a shaping diagnostic, not a replacement benchmark. Novelty uses both scale/gauge-normalized coefficient distance and cosine similarity to the public seed bank. A boundary can clear a `1e-3` export guard and still have cosine `0.99999+` to its ancestor.
-
-The repository therefore contains several legitimate “best” values answering different questions:
-
-| Claim | Official score | Feasibility | Interpretation |
-|---|---:|---:|---|
-| Raw legacy record, `s204/c0030` | **0.6420577** | `0.0097398` | Honest `0.634937`; inherited; `bank_cos 0.999998`; legacy single-shot path |
-| Campaign-one headline, `s105/c0045` | `0.6400196` | `0.0093054` | Equal-margin estimate ≈ `0.632`; inherited; cosine ≈ `0.999989` |
-| Low-margin polish ceiling | `0.6344215` | `0.0019244` | Inherited, with much more tolerance headroom |
-| Recorded public reference | `0.6361` | `0.00075` | Used only 7.5% of the feasibility tolerance |
-
-The raw record is legal under the pinned evaluator. Its limitation is scientific: the official rule makes the full 1% tolerance available, while the public reference used much less. Provenance must travel with the number.
-
-Every future result should be reported as a tuple:
-
-```text
-(official score, feasibility, objective_L, fidelity, evaluator fingerprint,
- public-bank lineage, scientific-data lineage, bank_dist, bank_cos,
- repeated-evaluation status)
-```
-
-</details>
-
-<details>
-<summary><strong>Independent construction, inherited refinement, and repair are different experiments</strong></summary>
-
-The three pre-bank, from-scratch stochastic programs improved bad boundaries but remained infeasible. Their best worst violations were about `0.519`, `0.517`, and **`0.4253`**, all with official P2 zero. This is the cleanest unaided evidence in the repository, and it is negative.
-
-The public seed bank changed the problem from construction to refinement. Model-written optimizers found a repeatable R/Z-split contraction ladder and swept base, curvature, and separate radial/vertical rates. That was a real optimizer result within an inherited basin: the campaign-one winner differed from the nearest public boundary by about 0.47% in coefficient norm, with cosine `0.999989`.
-
-The current repair workflow loads a host-controlled database of named, provenance-tagged boundaries while forcing the public leaderboard bank off. It includes self-generated and external scientific configurations. The best VLF boundary reduced worst violation to `0.0407015`; QI was just inside its bound, aspect was held at the search margin, elongation was nearly exact, and mirror remained limiting. Edge mirror ratio was `0.20814` against a `0.2` bound. This boundary is 4.07 times over the normalized feasibility limit, has not been officially re-scored, and has `L = 3.5815`. Even if it crossed feasibility at the same L, its score would be about `0.179`, far from the `0.70` research target. Feasibility repair and performance recovery require separate archives.
-
-The unaided `0.4253` and imported-seed `0.04070` results are not points on one optimization curve. A public-bank blackout establishes only that public entries were unavailable; it does not erase scientific-data ancestry.
-
-</details>
-
-<details>
-<summary><strong>Feedback, gradients, structural operators, and fidelity</strong></summary>
-
-Shared memory made failures and implementation hazards reusable, but it never became ground truth. Old headline numbers, speculative analyst notes, and concurrently written reviews can persist. Numeric claims must be reconstructed from ledgers, report JSON, and evaluator artifacts.
-
-Throughput work found that skipping a redundant coarse multigrid stage could preserve metrics and reduce cost. True VMEC hot restart converged to different equilibria and was rejected as a default. Graded soft failures recovered order information from some nonconverged solves; fatal early failures remained information-free.
-
-The first gradient A/B exposed only an exact boundary-only aspect gradient. Across two paired comparisons, honest deltas had opposite signs (`-0.00199`, `+0.00288`), three of five arms kept the resumed seed, and writers chose step caps around 100× larger than the later measured valid region. It tested the wrong constraint at the wrong scale and does not rule out useful solver gradients.
-
-Pinned-solver finite-difference polish did work locally. Over 17 steps and 715 solves, VLF honest score moved from `0.619963` to `0.622759`; official score transferred from `0.632082` to `0.634038`, while feasibility tightened from `0.004728` to `0.004361`. The operator then stalled. Project records disagree on whether the decisive cause was the QI projection wall or a search-only margin penalty; a later relaxed-margin run argued against the shaping explanation. The supported conclusion is that this local operator stalled, not that its disputed diagnosis is resolved.
-
-Gradient experiments also established that the hard-min objective is smooth around coefficient steps near `1e-5` but changes active grid point around `1e-4`; smoothing at useful larger steps introduced more bias than the target improvement. VMEC++ 0.7.1 sidecar gradients did not reliably descend the pinned 0.4.11 evaluator, so foreign-solver derivatives can propose but cannot adjudicate.
-
-Structural discovery registered typed mechanisms, predictions, kill criteria, evidence artifacts, independent/inherited arms, and VLF→LF→official promotion. Across nine completed independent census reports, 68 jobs produced 35 evaluated and 33 failed boundaries, with **zero promotable leaders**. The first inherited high-order band looked like a breakthrough at VLF and reversed officially:
-
-| Transform | Δ VLF honest | Δ official |
-|---|---:|---:|
-| band seed 3 | `+0.013634` | **`-0.001663`** |
-| band seed 5 | `+0.013603` | **`-0.000706`** |
-
-After correction, 56 inherited candidates were evaluated, six officially confirmed, six beat their source at VLF, and two beat it officially. The best official delta was only `+0.0001831`. The promotion gate prevented a false claim and measured the real effect two orders of magnitude smaller.
-
-</details>
-
-<details>
-<summary><strong>What the stellarator program currently supports</strong></summary>
-
-| Mechanism | Supported contribution | Limit |
-|---|---|---|
-| Clean returned-boundary scoring | Prevents candidate code from reporting its own winning score | Search-time patches can still bias selection; final fidelity remains mandatory |
-| Shared memory | Preserves failure modes and implementation hazards | Can preserve stale or speculative conclusions |
-| Honest score and novelty descriptors | Expose tolerance camping and near-copy novelty | Are shaping diagnostics, not external scientific claims |
-| Staged, quality-diversity, and bandit search | Preserve branches and behavioral cells | Often return the ancestor because proposal generation stays local |
-| Pinned-solver finite differences | Produce a small official local gain with correct transfer direction | Expensive, local, and stalled |
-| Structural mechanism loop | Makes predictions executable and falsifiable | Independent constructors remained infeasible; coarse-fidelity gains can reverse |
-| Research orchestration | Improves provenance, censorship handling, evidence validation, and review | Reports are not measurements; shadow campaigns produced no physics candidate |
-| Database repair | Produces the cleanest near-feasible non-leaderboard artifact | Uses imported scientific seeds, remains VLF/infeasible, and lost most of `L` |
-
-The immediate scientific blocker in the best repair artifact is mirror. A defensible next experiment must preserve the QI/aspect/elongation gains, pre-register the predicted edge-mirror change, impose a low-`L` regression bound, and promote surviving candidates through LF and official evaluation.
-
-</details>
-
-## How the project evolved
-
-![Development from benchmark axis comparisons to memory, provenance audits, fidelity correction, and persistent research and repair.](reports/figures/research-trajectory.svg)
-
-<details>
-<summary><strong>Development history and the experimental lesson</strong></summary>
-
-The repository began on 2026-07-18 with executable artifacts and five binary choices. The first 32-configuration screen was an experiment design as much as a software design. In the same first phase, the task surface expanded from bin packing and circles to TSP, C kernels, and CVRP. A 60-call bin-packing run and a 20-call C-kernel run established that one loop could improve very different executable artifacts.
-
-Early failures changed the optimizer. Equivalent bin-packing formulas motivated novelty-aware ties. Rejected candidates became reflection evidence. Append-only continuation preserved ancestry. CVRP saturation and timing noise motivated larger splits, host validation, repeated evaluation, and regime-aware validation.
-
-On 2026-07-22, feedback became durable task memory. Reviewers gained coverage rules, code diffs, falsifiable predictions, and an anti-repetition digest. A later web knowledge option routed sourced research through the reviewer/memory path instead of giving every writer an uncontrolled browser session. The architecture was implemented, but no replicated memory-versus-memory-plus-web study exists.
-
-The DAG campaign then moved above individual runs: specialist branches, restartable state, analysts, refiners, handoffs, and merges. Operational failures led to restart/reattachment controls. More consequentially, the `0.6400` stellarator headline was audited to an equal-margin estimate near `0.632`, redirecting the project from raw score toward provenance, margin, and verification.
-
-Late July added quality-diversity gating and bandit forks. August moved toward physics-aware experiments: differentiable diagnostics, matched gradient arms, pinned-solver finite differences, trust regions, structural mechanisms, and mandatory official promotion. The current research portfolio makes hypotheses, predictions, evidence ownership, and handoffs durable.
-
-Selected Git landmarks:
-
-- [`9d75ccc`](https://github.com/timbtz/evoharness/commit/9d75ccc489babdad0ce6196898e3797f91b05bb7) — initial generic loop and five axes.
-- [`d7d330c`](https://github.com/timbtz/evoharness/commit/d7d330ccadfcbff0964063d39abd2d8b3ead3aec) — first 96-run factorial screen.
-- [`8b92cd1`](https://github.com/timbtz/evoharness/commit/8b92cd186a3c8c0d212e4ad1fef7222558cc9789) and [`4361367`](https://github.com/timbtz/evoharness/commit/436136760e682297c8f367943e44ab0d4153f859) — durable memory and optimizer v2.
-- [`9094a0f`](https://github.com/timbtz/evoharness/commit/9094a0f386060ba1ddfa092f3504677cf2094705) — sourced web research through memory.
-- [`b90b872`](https://github.com/timbtz/evoharness/commit/b90b8727dafa68487cf02483f54089bcabe2f8f8) — restartable DAG campaign.
-- [`bdac150`](https://github.com/timbtz/evoharness/commit/bdac15065f7cbd83bc9945ecd23536bb9fe50762) — quality diversity and bandit search.
-- [`2d6e59a`](https://github.com/timbtz/evoharness/commit/2d6e59a5f80cec157971e1709d9e9f91eb9e5480) — solver gradients and experiment specifications.
-- `9d6681d` — official-fidelity correction of the structural artifact in the reviewed 45-commit history.
-
-The history does not show a sequence of uniformly better search algorithms. It shows improving experimental controls: comparable choices, complete ledgers, reusable negative evidence, noise handling, explicit provenance, fidelity promotion, and artifact-backed adjudication.
-
-</details>
-
-## Optimizer lineage
-
-EvoHarness is an experimental synthesis, not a reproduction or comparative benchmark of the systems below. [NOTICE.md](NOTICE.md) distinguishes adapted code and interfaces from systems studied as references.
-
-| System | Primary source | Connection to EvoHarness |
-|---|---|---|
-| AlphaEvolve | [Paper §2](https://arxiv.org/html/2506.13131v1) | Executable-program proposal, evaluator feedback, and retained program populations; EvoHarness exposes choices as experiments but does not reproduce DeepMind infrastructure or results |
-| OpenEvolve | [Repository](https://github.com/algorithmicsuperintelligence/openevolve) | Open evolutionary archive reference; the circle evaluator is adapted with attribution, and OpenEvolve defaults are not attributed to AlphaEvolve |
-| KernelEvolve | [Paper, revision 4](https://arxiv.org/html/2512.23236v4) | Persistent execution context and diagnostic feedback; EvoHarness's CPU C task is much narrower than accelerator-kernel synthesis |
-| GigaEvo / kernel-evo | [Repository](https://github.com/AXXX-Institute/kernel-evo) | DAG execution, archives, and storage separation were design references; EvoHarness's branch/merge implementation does not require GigaEvo or Redis |
-| SkillOpt | [Method](https://microsoft.github.io/SkillOpt/) · [code](https://github.com/microsoft/SkillOpt) | Analogy for reflective memory, bounded updates, held-out acceptance, and preserving rejected edits; EvoHarness mainly evolves code and boundaries |
-| FunSearch | [Repository](https://github.com/google-deepmind/funsearch) | Bin-packing representation and islands were adapted under attribution |
-| ReEvo | [Repository](https://github.com/ai4co/reevo) | Short/long reflection patterns and evaluator-driven algorithm evolution |
-| EoH | [Repository](https://github.com/FeiLiu36/EoH) | Population uniqueness and rank-weighted parent-selection patterns |
-
-The comparison that matters inside this project is architectural: what evolves; which evidence reaches the writer; how branches survive; who proposes and judges; what persists; where code runs; and which evaluator can certify a result. Historical provider migrations and unrelated runs do not rank models or external optimizers.
-
-## Reproducibility and evidence policy
-
-The inventory rebuilt on 2026-09-21 contained **337 JSONL ledgers, 107,186 rows, 141 run groups, 4,980 artifact files, 265 `run_end` events, and zero malformed rows**. The earlier 2026-09-17 review had 98,262 rows; all 8,924 later rows were factory `llm_error` events, while the persisted physical frontier remained unchanged. The refactored package passed **119 tests, with 2 skipped**, in 531 seconds on 2026-09-21. Checks also cover packaged resources, isolated-wheel installation, the pinned VMEC image, Python and compiled-C container execution, blocked container networking, and desktop/mobile rendering of the evidence explorer. The skipped tests require optional solver/JAX dependencies or explicit slow-test opt-in. These are validation results for this checkout, not a claim of bit-for-bit replay on another machine.
+The recorded package validation on September 21 was **119 tests passed, 2 skipped**. That is a historical validation result, not a claim that a new physics campaign has been run for this documentation update.
 
 ```bash
 uv run pytest
@@ -475,40 +613,45 @@ uv run --group analysis evoharness figures
 uv run evoharness inventory --exclude-family docs-smoke-check
 ```
 
-`figures` rebuilds the data-driven SVG/PDF/PNG assets. The two AI-generated system illustrations are retained with their prompts and are not overwritten by the plotting command.
+`figures` rebuilds data-driven assets; the two AI-generated conceptual illustrations are retained separately. Exact replay is limited by model sampling, hardware timing, external dependencies, and provider behavior. A defensible comparison still requires pinned inputs and evaluators, isolated memory, all failures in the denominator, and final verification. Budget checks occur between operations, so an in-flight call can cross a nominal limit.
 
-Strict bit-for-bit replay is limited by model sampling, hardware timing, downloaded benchmark instances, provider behavior, and external solver availability. A credible result still needs a complete denominator and an inspectable evidence packet:
+<a id="research-agenda"></a>
 
-1. State the question, expected direction, rejection criterion, model/solver budget, and wall time.
-2. Record the source fingerprint, exact models/settings, evaluator image and fidelity, seed origin, bank access, and isolated memory snapshot.
-3. Retain every proposal, invalid candidate, timeout, failed solve, and aborted branch.
-4. Separate search score, raw constraint violations, official score, novelty/provenance checks, and independent verification.
-5. Adjudicate the result as supported, contradicted, inconclusive, or an implementation failure.
+## 9. Continuing the research
 
-Generated repository artifacts have narrow roles:
+### A clearer experimental design before larger campaigns
 
-- [`reports/index.html`](reports/index.html) — offline explorer for architecture, axes, and run inventory.
-- [`reports/figures/`](reports/figures/) — generated SVG/PDF/PNG figures; `architecture.png` is the main system visual.
-- [`reports/data/`](reports/data/) — reviewed aggregate evidence and inventory exports.
-- `.local/runs/` — raw ledgers, candidates, state, and evaluator artifacts; local source evidence, untracked.
-- `.local/memory/` — generated mutable memory and snapshots; untracked.
-- `.local/reference/` and `.local/external/` — upstream checkouts and solver tools; untracked.
-- `.local/notebooks/`, `.local/leaderboard/`, `.local/archive/`, and `.local/plans/` — personal analysis and historical material; untracked.
+The next phase should test a smaller number of explicit hypotheses with repeated seeds, fixed evaluators, and matched resources. I want to measure **verified improvement per unit of model and evaluator compute**, alongside diversity and failure rate.
 
-The repository root intentionally stays small: installable source, six configs, reports, tests, README, and attribution. Project guidance and scientific interpretation live here so conclusions cannot drift across a maze of markdown files.
-
-## Research agenda
-
-The next experiments should distinguish score improvement, feasibility, and scientific novelty:
-
-| Question | Experiment | Evidence that would change the conclusion |
+| Question | Planned comparison | Evidence of progress |
 |---|---|---|
-| Can an independent constructor escape inherited stellarator basins? | Compare constructors and imported scientific equilibria in separate provenance classes under identical verification | A feasible official boundary with traceable construction and a mechanism beyond small perturbations of known entries |
-| Does richer feedback improve discovery? | Paired scalar/constraint/gradient arms with matched initialization, memory, models, inner calls, and wall time | Better official outcomes across seeds, with failed attempts and gradient cost included |
-| Does memory improve transferable reasoning? | Compare off, frozen knowledge, and evolving memory with isolated writes | Less repeated failure and better verified artifacts under matched resources, including stale-memory incidents |
-| Does orchestration help? | Single writer versus coordinator/worker/referee portfolio at equal total model and physics budget | More verified hypotheses or distinct feasible families with full failure accounting |
-| Can novelty pressure avoid imitation and useless excursions? | Pre-register a novelty policy and report quality, feasibility, lineage, and distance separately | A robust quality/diversity frontier; coefficient distance alone is insufficient |
-| Which role needs the expensive model? | Swap writer, analyst, and coordinator one at a time | Replicated improvement per dollar and solver hour |
-| Does cheap screening transfer? | Re-score selected and rejected samples at fixed official fidelity | Stable rankings and small selection optimism rather than grid-dependent gains |
+| **Does richer feedback help?** | Scalar versus constraint diagnostics versus gradients, with the same initialization and solver budget | Better official outcomes across seeds after including gradient cost |
+| **Does memory transfer useful knowledge?** | No memory, frozen knowledge, evolving memory; isolated writes | Less repeated failure and better held-out results, with stale-memory cases recorded |
+| **Do sub-agents justify their cost?** | One writer versus coordinator/workers/referee at equal total budget | More verified improvements or resolved hypotheses per unit of compute |
+| **Does novelty pressure find useful alternatives?** | Explicit diversity policy versus score-only selection, with provenance classes kept separate | Distinct feasible designs or behaviors that retain quality under verification |
+| **Does cheap screening transfer?** | Re-score selected and rejected samples at fixed official fidelity | Stable rankings and a measured rate of misleading screening gains |
 
-The present baseline is the latest persisted repair frontier, not the highest historical inherited score. The next scientifically meaningful step is an officially verified, provenance-complete artifact that survives the relevant fidelity and independence checks.
+### Open-weight models and self-hosting
+
+My intended direction is to rely more heavily on **open-weight models that can be self-hosted**, building on the extensive use of Z.ai/GLM in this project. Self-hosting would make inference capacity and deployment behavior explicit experimental variables and could support longer-running research without depending entirely on subscription limits.
+
+The first comparison should hold the task, context, search policy, and evaluator fixed while changing model access or model size. I would record model/checkpoint identity, inference settings, throughput, full compute cost, and verified task outcomes. Claude can remain a comparison or specialist option. The question is whether an affordable, reproducible open-weight setup can deliver useful discovery across repeated experiments.
+
+### More compute: test scaling rather than assume it
+
+A scaling relationship is a hypothesis for future work. The current experiments do not establish a scaling law for novelty or verified solution quality.
+
+I would vary the relevant resources separately:
+
+- **Inference budget:** more proposals, different model sizes, and different generation/review allocations.
+- **Evaluation budget:** more CPU solver calls, higher-fidelity checks, and repeated measurements.
+- **Search breadth:** more independent seeds and branches, with total resources matched against deeper sequential search.
+- **GPU access:** self-hosted inference and, where appropriate, a dedicated KernelBench-style kernel experiment with correctness and target-device timing.
+
+The resulting curves should report verified quality and diversity against tokens, solver work, elapsed time, and cost, including failed runs and uncertainty. This would show whether additional compute buys progress, reaches a plateau, or mainly produces more opportunities to exploit the evaluator. GPU availability alone should not be assumed to accelerate the existing CPU physics workflow.
+
+### The next stellarator milestone
+
+The immediate scientific step is to address the repair frontier's mirror violation while preserving its other constraint gains and preventing further collapse of `L`. Surviving candidates should pass LF and official evaluation before the search expands.
+
+From there, the target is an **officially feasible, provenance-complete artifact with useful performance**, followed by evidence that its mechanism or design is meaningfully different from inherited seeds. Keeping feasibility repair, performance improvement, and independent discovery as separate experiments will make the next phase easier to evaluate—and make any eventual claim of novelty more credible.
