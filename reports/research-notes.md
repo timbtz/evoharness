@@ -242,6 +242,11 @@ Other experiments exposed different limits:
 <details>
 <summary><strong>CVRP: a useful memory case, and a lesson in measurement</strong></summary>
 
+**26 October 2026 audit:** [Routing implementation, repeated measurements, related
+work, and VRPTW contributor plan](cvrp.md). The endpoints below are historical
+single observations; the shared ancestor measured 0.628%, and private outcomes
+later influenced development. They are not a causal memory ablation.
+
 The closest comparison started from the same ancestor and seed, with holdout selection, staged search, no web knowledge, and a $4 model budget per arm.
 
 | Feedback | Private gap | Model calls | Elapsed |

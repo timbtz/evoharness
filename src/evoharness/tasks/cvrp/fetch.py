@@ -1,4 +1,4 @@
-"""Download the 15 CVRPLIB instances used by the cvrp task (all four splits).
+"""Download the CVRPLIB instances used by the cvrp task and its legacy probes.
 
 Sets A/B/P (Augerat et al., 1995, proven optima) come from the CVRPLIB
 mirror at galgos.inf.puc-rio.br, addressed by numeric instance id (the
@@ -22,7 +22,8 @@ GALGOS_IDS = {
 PYVRP_URL = "https://raw.githubusercontent.com/PyVRP/Instances/main/CVRP/{}.{}"
 PYVRP_NAMES = [
     "X-n101-k25", "X-n110-k13", "X-n125-k30", "X-n153-k22",
-    "X-n200-k36", "X-n251-k28", "X-n303-k21",
+    "X-n186-k15", "X-n200-k36", "X-n228-k23", "X-n242-k48",
+    "X-n251-k28", "X-n303-k21",
 ]
 
 

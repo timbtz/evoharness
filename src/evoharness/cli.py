@@ -134,7 +134,7 @@ def _delegated_tail(argv: Sequence[str], args: argparse.Namespace) -> list[str]:
     which corrupts ordered workflow arguments such as ``--exclude-family x``.
     The public command grammar has a fixed prefix, so retain the raw suffix.
     """
-    if args.command in {"fetch", "stellarator", "physics"}:
+    if args.command in {"fetch", "cvrp", "stellarator", "physics"}:
         return list(argv[2:])
     return list(argv[1:])
 
@@ -303,6 +303,14 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("task", choices=("tsp", "cvrp"))
     fetch.add_argument("args", nargs=argparse.REMAINDER)
     fetch.set_defaults(handler=_command_fetch)
+
+    routing = sub.add_parser("cvrp", help="inspect and benchmark the CVRP optimizer")
+    routing_sub = routing.add_subparsers(dest="cvrp_command", required=True)
+    benchmark = routing_sub.add_parser(
+        "benchmark", help="re-evaluate frozen solvers without model calls", add_help=False)
+    benchmark.add_argument("args", nargs=argparse.REMAINDER)
+    benchmark.set_defaults(handler=lambda a: _run_module(
+        ("evoharness.analysis.cvrp_benchmark",), a.args))
 
     stellar = sub.add_parser("stellarator", help="run stellarator workflows")
     stellar_sub = stellar.add_subparsers(dest="stellar_command", required=True)

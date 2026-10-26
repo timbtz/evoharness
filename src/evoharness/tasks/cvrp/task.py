@@ -1,8 +1,11 @@
-"""Anytime CVRP task: evolve a whole solver module (Python policy + optional C
-kernels via compile_c) under a fixed per-instance wall-clock budget. Scoring and
-route validation happen HOST-side from the routes the sandbox returns, so evolved
-code cannot forge a score. Runs in a pinned-CPU docker container when available,
-else the unshare sandbox."""
+"""Anytime CVRP: evolve Python policies and optional C kernels via compile_c.
+
+The host validates returned routes, recomputes distance, and bounds total elapsed
+time. Per-instance timing shares candidate-controlled Python globals and is only
+best-effort. Docker provides a one-CPU quota and affinity where available.
+task_default permits weaker subprocess isolation when Docker is unavailable;
+require_container fails closed instead of changing execution backends.
+"""
 from __future__ import annotations
 
 import json
@@ -13,13 +16,31 @@ from evoharness.paths import task_data
 import numpy as np
 
 from evoharness.engine.candidate import EvalResult
-from evoharness.execution.sandbox import docker_image_ready, run_python, run_python_docker
+from evoharness.execution.policy import current_policy
+from evoharness.execution.sandbox import (
+    SandboxResult, docker_image_ready, run_python, run_python_docker,
+)
 from evoharness.tasks.common import run_harness
 
 _DIR = Path(__file__).parent
 _INST_DIR = task_data("cvrp")
 _IMAGE, _DOCKERFILE = "evoharness-cvrp-eval", str(_DIR / "Dockerfile.eval")
-_CPUSET = "3" if (os.cpu_count() or 1) >= 4 else None  # least-contended core here
+
+
+def _default_cpuset() -> str | None:
+    """Use a CPU the current process can access, retaining historical CPU 3.
+
+    cpu_count() describes the machine, not a job's cgroup/affinity restriction.
+    Without an affinity API, Docker's one-CPU quota still bounds compute.
+    """
+    try:
+        allowed = os.sched_getaffinity(0)
+    except (AttributeError, OSError):
+        return None
+    return str(3 if 3 in allowed else min(allowed)) if allowed else None
+
+
+_CPUSET = _default_cpuset()
 
 # Scored splits need HEADROOM: the seed solves every small A/B/P instance to
 # optimum within budget (gap 0.0 -> saturated gate signal, nothing can ever be
@@ -111,6 +132,14 @@ def _runner(script: str, timeout: float = 30.0, mem_mb: int = 1024):
             if docker_image_ready(_IMAGE, _DOCKERFILE, str(_DIR)):
                 res = run_python_docker(script, timeout, mem_mb, image=_IMAGE, cpuset=_CPUSET)
         return res
+    if current_policy() == "require_container":
+        # Preflight can succeed and the image/daemon can disappear later. Do not
+        # call run_python(): its strict mode uses a different, generic image.
+        return SandboxResult(
+            stdout="", stderr="Container execution required: CVRP evaluator image "
+            "evoharness-cvrp-eval is unavailable; fallback disabled.",
+            returncode=1, seconds=0.0, timed_out=False,
+        )
     return run_python(script, timeout, mem_mb)  # CI / no-docker fallback
 
 
@@ -118,7 +147,7 @@ def _load_vrp(name: str) -> dict:
     path = _INST_DIR / f"{name}.vrp"
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} missing — run `uv run python tasks/cvrp/fetch.py` first")
+            f"{path} missing — run `uv run evoharness fetch cvrp` first")
     cap, coords, demand, section = 0, {}, {}, None
     for line in path.read_text().splitlines():
         line = line.strip()
@@ -166,7 +195,7 @@ def _validate_and_cost(inst: dict, routes) -> tuple[str | None, int]:
     if sum(len(r) for r in routes) > 4 * n:
         return "routes contain far more entries than customers", 0
     flat = [c for r in routes for c in r]
-    if any(not isinstance(c, int) or not 1 <= c < n for c in flat):
+    if any(type(c) is not int or not 1 <= c < n for c in flat):
         return "customer indices must be ints in 1..n-1 (depot 0 must not appear)", 0
     if sorted(flat) != list(range(1, n)):
         miss = len(set(range(1, n)) - set(flat))
@@ -175,9 +204,17 @@ def _validate_and_cost(inst: dict, routes) -> tuple[str | None, int]:
         load = sum(dem[c] for c in r)
         if load > inst["capacity"]:
             return f"route load {load} exceeds capacity {inst['capacity']}", 0
-    d = _dmat(inst)
-    return None, int(sum(d[0, r[0]] + d[r, np.roll(r, -1)][:-1].sum() + d[r[-1], 0]
-                         for r in map(list, routes)))
+    # Only visited edges need re-costing. Building the full n x n distance
+    # matrix here needlessly made trusted validation quadratic in memory.
+    # Keep exactly the same EUC_2D rounding as the candidate's dense matrix.
+    coords = np.asarray(inst["coords"], dtype=float)
+    cost = 0
+    for route in routes:
+        path = np.array([0, *route, 0], dtype=np.intp)
+        delta = coords[path[1:]] - coords[path[:-1]]
+        distances = np.floor(np.sqrt((delta ** 2).sum(axis=1)) + 0.5)
+        cost += int(distances.astype(np.int64).sum())
+    return None, cost
 
 
 def _score(names: list[str], res: EvalResult) -> EvalResult:
