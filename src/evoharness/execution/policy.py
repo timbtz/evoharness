@@ -34,6 +34,14 @@ def execution_policy(policy: str, task: str | None = None):
         if not docker_image_ready("evoharness-stellar-eval", str(dockerfile)):
             raise RuntimeError("Container execution required: stellar_p2 needs the "
                                "evoharness-stellar-eval image and Docker daemon access.")
+    elif task == "cvrp" and policy == "require_container":
+        from evoharness.paths import PACKAGE_ROOT
+        from .sandbox import docker_image_ready
+        task_dir = PACKAGE_ROOT / "tasks" / "cvrp"
+        if not docker_image_ready("evoharness-cvrp-eval", str(task_dir / "Dockerfile.eval"),
+                                  str(task_dir)):
+            raise RuntimeError("Container execution required: cvrp needs the "
+                               "evoharness-cvrp-eval image and Docker daemon access.")
     elif policy == "require_container":
         benchmark_image()  # Fail before any model call if the required backend is absent.
     token = _CURRENT.set(policy)

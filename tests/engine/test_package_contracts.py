@@ -33,7 +33,7 @@ def test_curated_knowledge_injection_and_bounded_lookup():
     assert len(injected) == 3  # Index and two ranked pages.
 
 
-@pytest.mark.parametrize("task", ["binpacking", "stellar_p2"])
+@pytest.mark.parametrize("task", ["binpacking", "stellar_p2", "cvrp"])
 def test_missing_required_container_stops_before_model_or_ledger(tmp_path, monkeypatch, task):
     monkeypatch.setattr(sandbox, "docker_image_ready", lambda *args, **kwargs: False)
     def unexpected_llm(*args, **kwargs):
@@ -41,6 +41,40 @@ def test_missing_required_container_stops_before_model_or_ledger(tmp_path, monke
     with pytest.raises(RuntimeError, match="Container execution required"):
         run(Config(task=task, execution="require_container"), tmp_path / "run", unexpected_llm)
     assert not (tmp_path / "run" / "ledger.jsonl").exists()
+
+
+def test_cvrp_preflights_its_own_container(monkeypatch):
+    from evoharness.paths import PACKAGE_ROOT
+    calls = []
+
+    def ready(image, dockerfile=None, context=None):
+        calls.append((image, dockerfile, context))
+        return image == "evoharness-cvrp-eval"
+
+    monkeypatch.setattr(sandbox, "docker_image_ready", ready)
+    with policy.execution_policy("require_container", "cvrp"):
+        assert policy.current_policy() == "require_container"
+    task_dir = PACKAGE_ROOT / "tasks" / "cvrp"
+    assert calls == [("evoharness-cvrp-eval", str(task_dir / "Dockerfile.eval"), str(task_dir))]
+    assert policy.current_policy() == "task_default"
+
+
+def test_generic_container_does_not_satisfy_required_cvrp_backend(monkeypatch):
+    monkeypatch.setattr(sandbox, "docker_image_ready",
+                        lambda image, *args: image == policy.BENCHMARK_IMAGE)
+    with pytest.raises(RuntimeError, match="cvrp needs the evoharness-cvrp-eval"):
+        with policy.execution_policy("require_container", "cvrp"):
+            pytest.fail("must not enter the run without the CVRP image")
+    assert policy.current_policy() == "task_default"
+
+
+def test_cvrp_task_default_preserves_optional_container(monkeypatch):
+    def unexpected_preflight(*args, **kwargs):
+        pytest.fail("task_default should leave CVRP backend selection to its runner")
+
+    monkeypatch.setattr(sandbox, "docker_image_ready", unexpected_preflight)
+    with policy.execution_policy("task_default", "cvrp"):
+        assert policy.current_policy() == "task_default"
 
 
 def test_execution_policy_is_scoped_per_thread_and_resets(monkeypatch):

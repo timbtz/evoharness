@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "task": "cvrp",
+  "experiment": "frozen-program re-evaluation",
+  "started_at": "2026-10-26T10:15:34.203656+00:00",
+  "finished_at": "2026-10-26T10:21:31.584756+00:00",
+  "status": "complete",
+  "model_calls": 0,
+  "config": {
+    "splits": {
+      "val30": {
+        "instances": [
+          "X-n153-k22",
+          "X-n228-k23",
+          "X-n242-k48"
+        ],
+        "seconds_per_instance": 30.0
+      }
+    },
+    "bks": {
+      "X-n153-k22": 21220,
+      "X-n228-k23": 25742,
+      "X-n242-k48": 82751
+    },
+    "repeats": 1,
+    "order": "split, repeat, cyclically rotated candidates",
+    "script_timeout_slack_seconds": 15.0,
+    "host_wall_grace_seconds": 8.0
+  },
+  "config_sha256": "66b08b2d8806acf0d0ba8b33a57385bab9e5bb22431b669529ce219cf42889c7",
+  "candidates": [
+    {
+      "name": "seed",
+      "source": "assembled seed/kernel.c + seed/solver.py",
+      "sha256": "6b58ca1984161b02cd02740b2b9d4a5c024ebdeb147b5aef222bcc270c424410"
+    },
+    {
+      "name": "ancestor",
+      "source": "reports/data/cvrp/candidates/ancestor.py",
+      "sha256": "0b358df5c150dbde69928b262fc9affd4e59e7bb659c89edd7bfbfe3e59f4294"
+    },
+    {
+      "name": "score_only",
+      "source": "reports/data/cvrp/candidates/score_only.py",
+      "sha256": "f90695ae2c538281fb6d7ed0cf1ba75959a006c691a5f113bc4d86ffe407a1a1"
+    },
+    {
+      "name": "memory",
+      "source": "reports/data/cvrp/candidates/memory.py",
+      "sha256": "a722f4983a2abb20e3e27cc4895343f1acfd283b92511695142a273ae5a6e683"
+    }
+  ],
+  "environment": {
+    "python": "3.13.12",
+    "host_numpy": "2.5.1",
+    "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "host_cpu_count": 4,
+    "host_affinity": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "backend": "docker",
+    "container_image": "evoharness-cvrp-eval",
+    "container_image_id": "sha256:19c75f886c2c57535e7413061fa759dae6187d92af571289ddc14a14dfc0590d",
+    "cpuset": "3",
+    "memory_mb": 1024,
+    "container_cpus": 1,
+    "git_commit": "dc5033f614634d99e98e6b97a61790ebdfe5acfb",
+    "working_tree_dirty": true,
+    "instance_sha256": {
+      "X-n153-k22.vrp": "8e3849a5d8b3507b7830505fd3ec1bfd09449daa1651b7934df1ec485c35200a",
+      "X-n228-k23.vrp": "b3d33f7d6f7a59e36aff4147ff979479e1767426aa2fe2f3ee26a0476d05bcd8",
+      "X-n242-k48.vrp": "905c49fc4d14d4aa93a1a76e304c426d5e73fc7f29c35b583827e4c95b1fc3bc"
+    },
+    "source_sha256": {
+      "src/evoharness/tasks/cvrp/task.py": "9b7f6203fa55176cdf142c82d3e77f587a4479f5f5bc0b69fd1bd26f8a5f364f",
+      "src/evoharness/tasks/cvrp/seed.py": "66a17065b59250f4c824eaa939faabcbcc50c8ac2e8ff926f059c1e3437e1601",
+      "src/evoharness/tasks/cvrp/seed/solver.py": "df1f9169ba5fe1de90eccda33453ac62239f7dc32afa2344c729a7ab50847080",
+      "src/evoharness/tasks/cvrp/seed/kernel.c": "51955c22646c0b09d38f95fc11551d92c4812f078bc58edcc6b58d5414ac9908",
+      "src/evoharness/tasks/cvrp/Dockerfile.eval": "658491e99185d29a78ec9450ba262c005ac1381cdc6b2ccf2138feb7b37a669f",
+      "src/evoharness/analysis/cvrp_benchmark.py": "5f9846616bd567978f545a9864700ed84049e7b1f0e63da744c85bfc9c8d1839",
+      "src/evoharness/tasks/common.py": "68461131c200a9a7133d8a0b63930635526379d27418cddf220030a08eac657b",
+      "src/evoharness/execution/sandbox.py": "d7c2a95498d3a5361cdd103b88d168bc91788796b1528b16e37bc3c1e4d7817c",
+      "src/evoharness/execution/policy.py": "3555697b170689f354bd8c7b820aebd6d00bd090451fd8b43d27a25ce075ff90"
+    },
+    "execution_policy": "require_container"
+  },
+  "records": [
+    {
+      "status": "ok",
+      "error": null,
+      "score": -0.44795788014321936,
+      "mean_gap_pct": 0.44795788014321936,
+      "host_seconds": 89.2924277652055,
+      "instances": [
+        {
+          "name": "X-n153-k22",
+          "cost": 21366,
+          "bks": 21220,
+          "gap_pct": 0.6880301602262017,
+          "reported_solver_seconds": 29.65
+        },
+        {
+          "name": "X-n228-k23",
+          "cost": 25750,
+          "bks": 25742,
+          "gap_pct": 0.0310776163468262,
+          "reported_solver_seconds": 29.65
+        },
+        {
+          "name": "X-n242-k48",
+          "cost": 83268,
+          "bks": 82751,
+          "gap_pct": 0.6247658638566301,
+          "reported_solver_seconds": 29.65
+        }
+      ],
+      "candidate": "seed",
+      "split": "val30",
+      "repeat": 1,
+      "started_at": "2026-10-26T10:15:34.203922+00:00",
+      "finished_at": "2026-10-26T10:17:03.499415+00:00",
+      "evaluation_index": 1
+    },
+    {
+      "status": "ok",
+      "error": null,
+      "score": -0.15986081871295718,
+      "mean_gap_pct": 0.15986081871295715,
+      "host_seconds": 89.32650445727631,
+      "instances": [
+        {
+          "name": "X-n153-k22",
+          "cost": 21225,
+          "bks": 21220,
+          "gap_pct": 0.0235626767200754,
+          "reported_solver_seconds": 29.65
+        },
+        {
+          "name": "X-n228-k23",
+          "cost": 25753,
+          "bks": 25742,
+          "gap_pct": 0.042731722476886023,
+          "reported_solver_seconds": 29.65
+        },
+        {
+          "name": "X-n242-k48",
+          "cost": 83093,
+          "bks": 82751,
+          "gap_pct": 0.41328805694191006,
+          "reported_solver_seconds": 29.65
+        }
+      ],
+      "candidate": "ancestor",
+      "split": "val30",
+      "repeat": 1,
+      "started_at": "2026-10-26T10:17:03.499778+00:00",
+      "finished_at": "2026-10-26T10:18:32.829210+00:00",
+      "evaluation_index": 2
+    },
+    {
+      "status": "ok",
+      "error": null,
+      "score": -0.47820234164037895,
+      "mean_gap_pct": 0.478202341640379,
+      "host_seconds": 89.31532363640144,
+      "instances": [
+        {
+          "name": "X-n153-k22",
+          "cost": 21366,
+          "bks": 21220,
+          "gap_pct": 0.6880301602262017,
+          "reported_solver_seconds": 29.65
+        },
+        {
+          "name": "X-n228-k23",
+          "cost": 25783,
+          "bks": 25742,
+          "gap_pct": 0.15927278377748427,
+          "reported_solver_seconds": 29.65
+        },
+        {
+          "name": "X-n242-k48",
+          "cost": 83237,
+          "bks": 82751,
+          "gap_pct": 0.5873040809174511,
+          "reported_solver_seconds": 29.65
+        }
+      ],
+      "candidate": "score_only",
+      "split": "val30",
+      "repeat": 1,
+      "started_at": "2026-10-26T10:18:32.829728+00:00",
+      "finished_at": "2026-10-26T10:20:02.148720+00:00",
+      "evaluation_index": 3
+    },
+    {
+      "status": "ok",
+      "error": null,
+      "score": -0.15961833251345728,
+      "mean_gap_pct": 0.15961833251345728,
+      "host_seconds": 89.43119996692985,
+      "instances": [
+        {
+          "name": "X-n153-k22",
+          "cost": 21231,
+          "bks": 21220,
+          "gap_pct": 0.051837888784165884,
+          "reported_solver_seconds": 29.67
+        },
+        {
+          "name": "X-n228-k23",
+          "cost": 25753,
+          "bks": 25742,
+          "gap_pct": 0.042731722476886023,
+          "reported_solver_seconds": 29.67
+        },
+        {
+          "name": "X-n242-k48",
+          "cost": 83069,
+          "bks": 82751,
+          "gap_pct": 0.3842853862793199,
+          "reported_solver_seconds": 29.67
+        }
+      ],
+      "candidate": "memory",
+      "split": "val30",
+      "repeat": 1,
+      "started_at": "2026-10-26T10:20:02.149242+00:00",
+      "finished_at": "2026-10-26T10:21:31.584208+00:00",
+      "evaluation_index": 4
+    }
+  ],
+  "summary": [
+    {
+      "candidate": "seed",
+      "split": "val30",
+      "expected_repeats": 1,
+      "attempts": 1,
+      "successful_repeats": 1,
+      "failed_repeats": 0,
+      "complete": true,
+      "median_gap_pct": 0.44795788014321936,
+      "min_gap_pct": 0.44795788014321936,
+      "max_gap_pct": 0.44795788014321936
+    },
+    {
+      "candidate": "ancestor",
+      "split": "val30",
+      "expected_repeats": 1,
+      "attempts": 1,
+      "successful_repeats": 1,
+      "failed_repeats": 0,
+      "complete": true,
+      "median_gap_pct": 0.15986081871295715,
+      "min_gap_pct": 0.15986081871295715,
+      "max_gap_pct": 0.15986081871295715
+    },
+    {
+      "candidate": "score_only",
+      "split": "val30",
+      "expected_repeats": 1,
+      "attempts": 1,
+      "successful_repeats": 1,
+      "failed_repeats": 0,
+      "complete": true,
+      "median_gap_pct": 0.478202341640379,
+      "min_gap_pct": 0.478202341640379,
+      "max_gap_pct": 0.478202341640379
+    },
+    {
+      "candidate": "memory",
+      "split": "val30",
+      "expected_repeats": 1,
+      "attempts": 1,
+      "successful_repeats": 1,
+      "failed_repeats": 0,
+      "complete": true,
+      "median_gap_pct": 0.15961833251345728,
+      "min_gap_pct": 0.15961833251345728,
+      "max_gap_pct": 0.15961833251345728
+    }
+  ],
+  "limitations": [
+    "Repeats share solver code and its internal RNG policy; these are timing reruns.",
+    "Previously inspected private instances are a regression set, not fresh holdout evidence.",
+    "Short-budget CVRP gaps do not measure VRPTW or XLTW challenge readiness.",
+    "Candidate-reported solver seconds are informational; the host bounds total elapsed time."
+  ]
+}

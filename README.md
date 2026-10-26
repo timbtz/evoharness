@@ -6,6 +6,7 @@
   <a href="#the-idea">The idea</a> ·
   <a href="#what-i-tested">Experiments</a> ·
   <a href="#what-the-experiments-showed">Results</a> ·
+  <a href="#the-routing-case-study">CVRP → VRPTW</a> ·
   <a href="#the-vmec-case-study">VMEC++</a> ·
   <a href="#where-this-goes-next">Next steps</a>
 </p>
@@ -62,6 +63,50 @@ The CVRP memory result is a **single-seed case study**, affected by shared histo
 The strongest lesson was that **better experimental controls mattered as much as a more elaborate optimizer**. Equivalent code, stale memory, tolerance consumption, and coarse solver artifacts each changed how I evaluated progress.
 
 <sub>Scientific evidence reviewed 2026-09-17; inventory refreshed 2026-09-21. [Benchmark evidence](reports/data/benchmark-evidence.json) · [Stellarator evidence](reports/data/stellar-evidence.json) · [Full research notes](reports/research-notes.md)</sub>
+
+## The routing case study
+
+**EvoHarness is a useful starting point for routing research; the implemented task is CVRP, not yet VRPTW.** The model evolves a complete Python solver with an embedded C search kernel. The seed combines Clarke–Wright construction, granular local search, and ruin-and-recreate search. The host checks customer coverage, capacity, and route distance against fixed CVRPLib references.
+
+![Implemented CVRP architecture: an LLM edits a Python/C solver; a one-CPU sandbox runs it; host validation checks returned routes; selection and optional memory guide subsequent proposals.](reports/figures/cvrp-optimizer-loop.png)
+
+The standard scoring budgets are **5 seconds per training/validation instance and 6 seconds per private instance**, with a 30-second validation probe. In the diagram, “held-out audit” names the evaluation stage: these historical private instances have since influenced development, so they now serve as a regression set. Host scoring is authoritative; per-instance timing inside candidate code remains best-effort.
+
+### What the routing experiments established
+
+| Historical program | Recorded private gap | Interpretation |
+|---|---:|---|
+| Shared evolved ancestor | 0.628% | Starting point of the paired feedback study |
+| Score-only endpoint | 0.748% | 96 model calls; worse than the ancestor's single measurement |
+| Memory endpoint | 0.581% | 165 calls; 0.047 percentage points below the ancestor's single measurement |
+
+These are **single observations, not a controlled improvement curve**. The 0.167-point difference between endpoints is comparable to recorded timing variation; memory also accumulated across runs. The memory candidate itself later measured **0.581 / 0.636 / 0.680%**. This supports investigating the mechanism, but does not demonstrate a causal memory benefit or a new BKS. [Evidence, fresh re-evaluations, and limitations →](reports/cvrp.md)
+
+**Fresh recheck, 26 October 2026:** three repeats per program gave private median gaps of **0.576% seed / 0.666% score-only / 0.692% memory**. Memory did better on validation, but its historical private advantage did not reproduce in this batch. These are timing repeats of frozen programs, not new independent evolution runs. [All 18 evaluations](reports/data/cvrp/recheck-20261026.json)
+
+### Hypothesis for the project study
+
+> Given a strong, fixed VRPTW solver, LLM evolution of small search components can improve fleet size and distance under matched compute. The central tests are whether gains exceed repeated-run variation and transfer from cheap development instances to longer runs and larger instances.
+
+![Proposed VRPTW architecture, not implemented: evolve small operators around a trusted time-window solver, evaluate with matched budgets, promote repeated gains to long-run search, and independently validate solutions.](reports/figures/vrptw-hybrid-proposal.png)
+
+This has direct precedent: the **2026 CVRP challenge winner used LLM-evolved AILS-II components within a larger solver portfolio**. That result also involved substantial compute; it does not isolate the contribution of the LLM. [Organizer report](https://arxiv.org/html/2601.11467v2)
+
+The announced **2027 VRPTW challenge runs 24 February–26 March**, on **1,000–10,000 customers**, minimizing **vehicles first, distance second**. As of this audit on 26 October 2026, detailed rules and XLTW-Test are scheduled for 28 October. [Official announcement](https://galgos.inf.puc-rio.br/cvrplib/index.php/en/challenges/vrptw/overview)
+
+The next implementation should establish a pinned VRPTW baseline, independent time-window validation, explicit fleet reduction, and one narrow evolving operator. The present dense distance and route arrays cannot support the XL target. A fresh test set, isolated memory, independent seeds, and comparable solver/model budgets are prerequisites for a stronger claim.
+
+**Start here:** [CVRP source map and commands](src/evoharness/tasks/cvrp/README.md) · [Detailed assessment and contributor plan](reports/cvrp.md) · [Frozen historical candidates](reports/data/cvrp/candidates/) · [Original evolution config](configs/cvrp.json)
+
+```bash
+uv run evoharness fetch cvrp
+uv run evoharness cvrp benchmark --splits val private --repeats 3 \
+  --candidate score_only=reports/data/cvrp/candidates/score_only.py \
+  --candidate memory=reports/data/cvrp/candidates/memory.py \
+  --output .local/runs/cvrp-recheck.json
+```
+
+This command re-evaluates the seed and frozen programs sequentially, requires Docker by default, records hashes and failures, and makes **no model calls**. The two architecture illustrations use built-in image generation; [prompts and provenance](reports/data/cvrp/visual-provenance.json) are preserved.
 
 <a id="stellarator-evidence-in-depth"></a>
 

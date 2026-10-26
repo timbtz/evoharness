@@ -1,0 +1,51 @@
+{
+  "reviewed_at": "2026-10-26",
+  "meaning": "Unmodified historical solver snapshots, copied from ignored local run artifacts for reproducible regression studies. Private scores are historical observations, not current guarantees.",
+  "candidates": [
+    {
+      "label": "ancestor",
+      "path": "reports/data/cvrp/candidates/ancestor.py",
+      "sha256": "0b358df5c150dbde69928b262fc9affd4e59e7bb659c89edd7bfbfe3e59f4294",
+      "source_run": "cvrp-s0-43507138",
+      "source_candidate": "c0014",
+      "source_ledger_sha256": "9f780f555365498d27bf3e4cb31f1c24d2200d274f9bcf053ac49e62d4d50db0",
+      "historical_run_end": {
+        "best_id": "c0014",
+        "private": -0.6276726617430447,
+        "calls": 29,
+        "usd": 1.0279,
+        "seconds": 1821.4
+      }
+    },
+    {
+      "label": "score_only",
+      "path": "reports/data/cvrp/candidates/score_only.py",
+      "sha256": "f90695ae2c538281fb6d7ed0cf1ba75959a006c691a5f113bc4d86ffe407a1a1",
+      "source_run": "cvrp-s3-51556548",
+      "source_candidate": "c0033r1",
+      "source_ledger_sha256": "a3a32722559c0bea800b7189136d5bc7cbc18e34fb1e6a42fa1553d461ee4cc1",
+      "historical_run_end": {
+        "best_id": "c0033r1",
+        "private": -0.7475657085848356,
+        "calls": 96,
+        "usd": 4.0165,
+        "seconds": 8405.1
+      }
+    },
+    {
+      "label": "memory",
+      "path": "reports/data/cvrp/candidates/memory.py",
+      "sha256": "a722f4983a2abb20e3e27cc4895343f1acfd283b92511695142a273ae5a6e683",
+      "source_run": "cvrp-s3-45465035",
+      "source_candidate": "c0035",
+      "source_ledger_sha256": "d43b3655ddc8daa0baa753b0c302c49ab4dcc5a4648f85748cb7bc5fb2f9488f",
+      "historical_run_end": {
+        "best_id": "c0035",
+        "private": -0.5806637906329615,
+        "calls": 165,
+        "usd": 4.0831,
+        "seconds": 5951.3
+      }
+    }
+  ]
+}
